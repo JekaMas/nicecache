@@ -42,6 +42,7 @@ func NewNiceCache() *Cache {
 	}
 }
 
+//TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
 func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	h := getHash(key)
 
@@ -50,7 +51,7 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	freeIdx := c.popFreeIndex()
 
 	c.Lock()
-	c.index[h] = [2]int{now + expireSeconds, c.popFreeIndex()}
+	c.index[h] = [2]int{now + expireSeconds, freeIdx}
 	c.Unlock()
 
 	c.c[freeIdx] = value
@@ -109,19 +110,21 @@ func (c *Cache) popFreeIndex() int {
 		atomic.AddInt32(c.freeCount, freeBatchSize)
 	}
 
-	var key int
 	c.freeIndexMutex.RLock()
-	for key = range c.freeIndexes {
-		break
+	for key := range c.freeIndexes {
+		c.freeIndexMutex.RUnlock()
+
+		c.freeIndexMutex.Lock()
+		delete(c.freeIndexes, key)
+		c.freeIndexMutex.Unlock()
+
+		atomic.AddInt32(c.freeCount, -1)
+
+		return key
 	}
 	c.freeIndexMutex.RUnlock()
 
-	c.freeIndexMutex.Lock()
-	delete(c.freeIndexes, key)
-	c.freeIndexMutex.Unlock()
-
-	atomic.AddInt32(c.freeCount, -1)
-	return key
+	return 0
 }
 
 func (c *Cache) pushFreeIndex(key int) {

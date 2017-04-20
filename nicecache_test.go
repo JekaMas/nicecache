@@ -3,12 +3,15 @@ package nicecache
 import (
 	"awg"
 	"fmt"
+	"runtime"
 	"testing"
 )
 
 const (
 	keyLength = 1024
 )
+
+var wgCapacity = runtime.NumCPU() * 10
 
 func Benchmark_Cache_Circle_Set(b *testing.B) {
 	cache := NewNiceCache()
@@ -54,7 +57,7 @@ func Benchmark_Cache_Circle_Set_Parallel(b *testing.B) {
 	}
 
 	wg := &awg.AdvancedWaitGroup{}
-	wg.SetCapacity(4)
+	wg.SetCapacity(wgCapacity)
 	b.ReportAllocs()
 	b.StartTimer()
 	b.ResetTimer()
@@ -130,7 +133,7 @@ func Benchmark_Cache_Circle_Get_Parallel(b *testing.B) {
 	}
 
 	wg := &awg.AdvancedWaitGroup{}
-	wg.SetCapacity(4)
+	wg.SetCapacity(wgCapacity)
 	b.ReportAllocs()
 	b.StartTimer()
 	b.ResetTimer()
