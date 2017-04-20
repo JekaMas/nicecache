@@ -96,11 +96,10 @@ func (c *Cache) Delete(key []byte) {
 
 // FIXME Allocates 1 objects ? Check
 func (c *Cache) popFreeIndex() int {
-	var key int
-
 	if atomic.LoadInt32(c.freeCount) == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
+		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
 		c.freeIndexMutex.Lock()
 		for i := 0; i < freeBatchSize; i++ {
 			c.freeIndexes[i] = struct{}{}
@@ -110,6 +109,7 @@ func (c *Cache) popFreeIndex() int {
 		atomic.AddInt32(c.freeCount, freeBatchSize)
 	}
 
+	var key int
 	c.freeIndexMutex.RLock()
 	for key = range c.freeIndexes {
 		break
@@ -128,6 +128,7 @@ func (c *Cache) pushFreeIndex(key int) {
 	c.freeIndexMutex.Lock()
 	c.freeIndexes[key] = struct{}{}
 	c.freeIndexMutex.Unlock()
+
 	atomic.AddInt32(c.freeCount, 1)
 }
 
@@ -137,5 +138,6 @@ func (c *Cache) Flush() {
 		c.freeIndexes[i] = struct{}{}
 	}
 	c.freeIndexMutex.Unlock()
+
 	atomic.StoreInt32(c.freeCount, cacheSize)
 }
