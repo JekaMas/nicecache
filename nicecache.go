@@ -9,7 +9,7 @@ import (
 const (
 	cacheSize        = 1024
 	freeBatchPercent = 0.1
-	freeBatchSize    = int(cacheSize * freeBatchPercent)
+	freeBatchSize    = 102 //int(cacheSize * float32(freeBatchPercent)) TODO generate
 	expiredIndex     = 0
 	valueIndex       = 1
 )
