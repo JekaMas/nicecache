@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"time"
+	"sync/atomic"
 )
 
 const (
@@ -22,6 +23,7 @@ type Cache struct {
 
 	freeIndexMutex sync.RWMutex
 	freeIndexes    map[int]struct{}
+	freeCount      *int32
 }
 
 func NewNiceCache() *Cache {
@@ -30,10 +32,13 @@ func NewNiceCache() *Cache {
 		freeIndexes[i] = struct{}{}
 	}
 
+	n := int32(len(freeIndexes))
+	freeCount := &n
 	return &Cache{
 		c:           [cacheSize]TestValue{},
 		index:       make(map[uint64][2]int, cacheSize),
 		freeIndexes: freeIndexes,
+		freeCount:   freeCount,
 	}
 }
 
@@ -89,15 +94,11 @@ func (c *Cache) Delete(key []byte) {
 	c.pushFreeIndex(res[valueIndex])
 }
 
-// FIXME Allocates 2 objects !!!
+// FIXME Allocates 1 objects ? Check
 func (c *Cache) popFreeIndex() int {
 	var key int
 
-	c.freeIndexMutex.RLock()
-	indexCount := len(c.freeIndexes)
-	c.freeIndexMutex.RUnlock()
-
-	if indexCount == 0 {
+	if atomic.LoadInt32(c.freeCount) == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
 		c.freeIndexMutex.Lock()
@@ -105,6 +106,8 @@ func (c *Cache) popFreeIndex() int {
 			c.freeIndexes[i] = struct{}{}
 		}
 		c.freeIndexMutex.Unlock()
+
+		atomic.AddInt32(c.freeCount, freeBatchSize)
 	}
 
 	c.freeIndexMutex.RLock()
@@ -117,6 +120,7 @@ func (c *Cache) popFreeIndex() int {
 	delete(c.freeIndexes, key)
 	c.freeIndexMutex.Unlock()
 
+	atomic.AddInt32(c.freeCount, -1)
 	return key
 }
 
@@ -124,6 +128,7 @@ func (c *Cache) pushFreeIndex(key int) {
 	c.freeIndexMutex.Lock()
 	c.freeIndexes[key] = struct{}{}
 	c.freeIndexMutex.Unlock()
+	atomic.AddInt32(c.freeCount, 1)
 }
 
 func (c *Cache) Flush() {
@@ -132,4 +137,5 @@ func (c *Cache) Flush() {
 		c.freeIndexes[i] = struct{}{}
 	}
 	c.freeIndexMutex.Unlock()
+	atomic.StoreInt32(c.freeCount, cacheSize)
 }
