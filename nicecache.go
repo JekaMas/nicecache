@@ -50,7 +50,7 @@ func NewNiceCache() *Cache {
 	}
 }
 
-// TODO отпрофилировать под нагрузкой
+// TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
 // TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
 func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	h := getHash(key)
@@ -79,7 +79,6 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 //TODO сделать нормальные ошибки
 var NotFoundError = errors.New("key not found")
 
-//FIXME клинит на размере от 10^6
 func (c *Cache) Get(key []byte) (TestValue, error) {
 	h := getHash(key)
 	c.RLock()
@@ -134,18 +133,13 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 	c.pushFreeIndex(res[valueIndex])
 }
 
-// FIXME Allocates 1 objects ? Check
+// FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
-	c.freeIndexMutex.RLock()
-	freeCount := atomic.LoadInt32(c.freeCount)
-	c.freeIndexMutex.RUnlock()
-
-	if freeCount == 0 {
+	c.freeIndexMutex.Lock()
+	if atomic.LoadInt32(c.freeCount) == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
 		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
-
-		c.freeIndexMutex.Lock()
 
 		i := 0
 		c.Lock()
@@ -175,7 +169,6 @@ func (c *Cache) popFreeIndex() int {
 		}
 	}
 
-	c.freeIndexMutex.Lock()
 	for idx := range c.freeIndexes {
 		delete(c.freeIndexes, idx)
 		atomic.AddInt32(c.freeCount, -1)
