@@ -10,7 +10,6 @@ import (
 
 var repeats = freeBatchSize - 1
 
-// TODO убрать awg из тестов. использовать parallelRun
 func Benchmark_Cache_Circle_Set(b *testing.B) {
 	cache := NewNiceCache()
 
