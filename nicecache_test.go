@@ -1,37 +1,30 @@
 package nicecache
 
 import (
-	"awg"
 	"fmt"
-	"runtime"
+	"strconv"
+	"sync/atomic"
 	"testing"
 )
 
-const (
-	keyLength = 1024
-)
+var repeats = freeBatchSize - 1
 
-var wgCapacity = runtime.NumCPU() * 10
-
+// TODO убрать awg из тестов. использовать parallelRun
 func Benchmark_Cache_Circle_Set(b *testing.B) {
 	cache := NewNiceCache()
 
-	keys := make([][]byte, b.N, b.N)
-	values := make([]TestValue, b.N, b.N)
-	for i := 0; i < b.N; i++ {
-		key := make([]byte, keyLength, keyLength)
-		key[i%keyLength] = 'a'
-		keys[i] = key
-
+	keys := make([][]byte, repeats)
+	values := make([]TestValue, repeats)
+	for i := 0; i < repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
 		values[i] = getTestValue()
 	}
 
 	var err error
 	b.ReportAllocs()
-	b.StartTimer()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		e := cache.Set(keys[i], values[i], 180)
+		e := cache.Set(keys[i%repeats], values[i%repeats], 180)
 		if e != nil {
 			err = e
 		}
@@ -46,47 +39,44 @@ func Benchmark_Cache_Circle_Set(b *testing.B) {
 func Benchmark_Cache_Circle_Set_Parallel(b *testing.B) {
 	cache := NewNiceCache()
 
-	keys := make([][]byte, b.N, b.N)
-	values := make([]TestValue, b.N, b.N)
-	for i := 0; i < b.N; i++ {
-		key := make([]byte, keyLength, keyLength)
-		key[i%keyLength] = 'a'
-		keys[i] = key
-
+	keys := make([][]byte, repeats)
+	values := make([]TestValue, repeats)
+	for i := 0; i < repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
 		values[i] = getTestValue()
 	}
 
-	wg := &awg.AdvancedWaitGroup{}
-	wg.SetCapacity(wgCapacity)
+	var i int32 = 0
+	var err error
 	b.ReportAllocs()
-	b.StartTimer()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		i := i
-		wg.Add(func() error {
-			cache.Set(keys[i], values[i], 180)
-			return nil
-		})
-
-	}
-	wg.Start()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := atomic.AddInt32(&i, 1)
+			e := cache.Set(keys[int(i)%repeats], values[int(i)%repeats], 180)
+			if e != nil {
+				err = e
+			}
+		}
+	})
 	b.StopTimer()
+
+	if err != nil {
+		fmt.Println("ERROR!!! SET ", err)
+	}
 }
 
 func Benchmark_Cache_Circle_Get(b *testing.B) {
 	cache := NewNiceCache()
 
-	keys := make([][]byte, b.N, b.N)
-	values := make([]TestValue, b.N, b.N)
-	for i := 0; i < b.N; i++ {
-		key := make([]byte, keyLength, keyLength)
-		key[i%keyLength] = 'a'
-		keys[i] = key
-
+	keys := make([][]byte, repeats)
+	values := make([]TestValue, repeats)
+	for i := 0; i < repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
 		values[i] = getTestValue()
 	}
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; i < repeats; i++ {
 		err := cache.Set(keys[i], values[i], 180)
 		if err != nil {
 			fmt.Println("ERROR!!! SET: ", err)
@@ -98,10 +88,9 @@ func Benchmark_Cache_Circle_Get(b *testing.B) {
 		err error
 	)
 	b.ReportAllocs()
-	b.StartTimer()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		res, err = cache.Get(keys[i])
+		res, err = cache.Get(keys[i%repeats])
 		if err != nil {
 			fmt.Println("ERROR!!! GET ", err)
 		}
@@ -114,42 +103,35 @@ func Benchmark_Cache_Circle_Get(b *testing.B) {
 func Benchmark_Cache_Circle_Get_Parallel(b *testing.B) {
 	cache := NewNiceCache()
 
-	keys := make([][]byte, b.N, b.N)
-	values := make([]TestValue, b.N, b.N)
-	for i := 0; i < b.N; i++ {
-		key := make([]byte, keyLength, keyLength)
-		key[i%keyLength] = 'a'
-		keys[i] = key
-
+	keys := make([][]byte, repeats)
+	values := make([]TestValue, repeats)
+	for i := 0; i < repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
 		values[i] = getTestValue()
 	}
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; i < repeats; i++ {
 		err := cache.Set(keys[i], values[i], 180)
-
 		if err != nil {
 			fmt.Println("ERROR!!! SET ", err)
 		}
 	}
 
-	wg := &awg.AdvancedWaitGroup{}
-	wg.SetCapacity(wgCapacity)
+	var i int32 = 0
+	var err error
 	b.ReportAllocs()
-	b.StartTimer()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		i := i
-		wg.Add(func() error {
-			res, err := cache.Get(keys[i])
-			_ = res
-			return err
-		})
-
-	}
-	wg.Start()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := atomic.AddInt32(&i, 1)
+			_, e := cache.Get(keys[int(i)%repeats])
+			if e != nil {
+				err = e
+			}
+		}
+	})
 	b.StopTimer()
 
-	err := wg.GetLastError()
 	if err != nil {
 		fmt.Println("ERROR!!! GET ", err)
 	}
@@ -158,23 +140,20 @@ func Benchmark_Cache_Circle_Get_Parallel(b *testing.B) {
 func Benchmark_Cache_Circle_SetAndGet(b *testing.B) {
 	cache := NewNiceCache()
 
-	keys := make([][]byte, b.N, b.N)
-	values := make([]TestValue, b.N, b.N)
-	for i := 0; i < b.N; i++ {
-		key := make([]byte, keyLength, keyLength)
-		key[i%keyLength] = 'a'
-		keys[i] = key
-
+	keys := make([][]byte, repeats)
+	values := make([]TestValue, repeats)
+	for i := 0; i < repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
 		values[i] = getTestValue()
 	}
+	cache.Set(keys[0], values[0], 180)
 
 	var res TestValue
 	b.ReportAllocs()
-	b.StartTimer()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Set(keys[(i+1)%b.N], values[(i+1)%b.N], 180)
-		res, _ = cache.Get(keys[i])
+		cache.Set(keys[(i+1)%repeats], values[(i+1)%repeats], 180)
+		res, _ = cache.Get(keys[i%repeats])
 	}
 	b.StopTimer()
 
