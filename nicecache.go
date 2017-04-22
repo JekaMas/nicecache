@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	cacheSize        = 1024*1024
+	cacheSize        = 1024 * 1024 * 10
 	freeBatchPercent = 10 // TODO: tune
 	expiredIndex     = 0
 	valueIndex       = 1
@@ -59,15 +59,14 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	c.RUnlock()
 
 	var freeIdx int
+	//TODO: учитывать, что ноды могут быть в разных часовых поясах
 	now := int(time.Now().Unix())
 
 	if !ok {
-		//TODO: учитывать, что ноды могут быть в разных часовых поясах
 		freeIdx = c.popFreeIndex()
 	} else {
 		freeIdx = res[valueIndex]
 	}
-
 
 	c.Lock()
 	c.index[h] = [2]int{now + expireSeconds, freeIdx}
