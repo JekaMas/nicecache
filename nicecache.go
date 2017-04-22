@@ -26,6 +26,7 @@ type Cache struct {
 	// TODO сделать дополнительное разбиение кэша на buckets в зависимости от размера cacheSize
 	c [cacheSize]TestValue // Preallocated storage
 
+	// Разбить на массив [16][2]{sync.RWMutex, index map[uint64][2]int} разбивать по последним 4 битам uint64
 	sync.RWMutex
 	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
 
@@ -34,6 +35,7 @@ type Cache struct {
 	freeCount      *int32
 }
 
+// TODO: добавить логер, метрику в виде определяемых интерфейсов
 func NewNiceCache() *Cache {
 	freeIndexes := make(map[int]struct{}, cacheSize)
 	for i := 0; i < cacheSize; i++ {
@@ -207,14 +209,7 @@ func (c *Cache) Flush() {
 }
 
 func (c *Cache) Len() int {
-	//DEBUG - return this in prod
-	//return cacheSize - int(atomic.LoadInt32(c.freeCount))
-
-	//DEBUG
-	c.RLock()
-	len := len(c.index)
-	c.RUnlock()
-	return len
+	return cacheSize - int(atomic.LoadInt32(c.freeCount))
 }
 
 //TODO batch get, set, delete ?
