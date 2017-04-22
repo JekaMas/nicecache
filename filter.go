@@ -2,8 +2,15 @@ package nicecache
 
 import "github.com/opennota/fasthash"
 
-func getHash(item []byte) uint64 {
+const (
+	bucketIndex = 0
+	hashIndex   = 1
+)
+
+func getHash(item []byte) [2]uint64 {
 	const primeSeed = 380383699
 
-	return fasthash.Hash64(primeSeed, item)
+	h := fasthash.Hash64(primeSeed, item)
+	bits := h & bucketsBin
+	return [2]uint64{bits, h}
 }

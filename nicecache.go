@@ -9,11 +9,14 @@ import (
 )
 
 const (
-	cacheSize        = 1024 * 1024 * 10
-	freeBatchPercent = 10 // TODO: tune
+	bucketsBin       = 4 // TODO get this from params in generator
+	buckets          = (1 << bucketsBin) - 1
+	cacheSize        = 1024 * 1024 * 10 // TODO get this from params in generator
+	freeBatchPercent = 10               // TODO: tune // TODO get this from params in generator
 	expiredIndex     = 0
 	valueIndex       = 1
 
+	// TODO get this from params in generator
 	alpha              = 1 // Percent increasing speed of freeBatchSize
 	maxFreeRatePercent = 33
 )
@@ -21,14 +24,18 @@ const (
 //TODO generate as const
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 
+type index struct {
+	*sync.RWMutex
+	m map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+}
+
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
 	// TODO сделать дополнительное разбиение кэша на buckets в зависимости от размера cacheSize
 	c [cacheSize]TestValue // Preallocated storage
 
-	// Разбить на массив [16][2]{sync.RWMutex, index map[uint64][2]int} разбивать по последним 4 битам uint64
-	sync.RWMutex
-	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+	// Разбить на массив [buckets]{sync.RWMutex, index map[uint64][2]int} разбивать по последним 4 битам uint64
+	idx [buckets]index
 
 	freeIndexMutex sync.RWMutex
 	freeIndexes    map[int]struct{}
@@ -44,9 +51,19 @@ func NewNiceCache() *Cache {
 
 	n := int32(cacheSize)
 	freeCount := &n
+
+	indexes := [buckets]index{}
+	for i := 0; i < buckets; i++ {
+		mutex := sync.RWMutex{}
+		indexes[i] = index{
+			&mutex,
+			make(map[uint64][2]int, cacheSize),
+		}
+	}
+
 	return &Cache{
 		c:           [cacheSize]TestValue{},
-		index:       make(map[uint64][2]int, cacheSize),
+		idx:         indexes,
 		freeIndexes: freeIndexes,
 		freeCount:   freeCount,
 	}
@@ -55,24 +72,26 @@ func NewNiceCache() *Cache {
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
 // TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
 func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
-	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
+	hashes := getHash(key)
+	bucket := c.idx[hashes[bucketIndex]]
+
+	bucket.RLock()
+	res, ok := bucket.m[hashes[hashIndex]]
+	bucket.RUnlock()
 
 	var freeIdx int
 	//TODO: учитывать, что ноды могут быть в разных часовых поясах
 	now := int(time.Now().Unix())
 
 	if !ok {
-		freeIdx = c.popFreeIndex()
+		freeIdx = c.popFreeIndex(hashes[bucketIndex])
 	} else {
 		freeIdx = res[valueIndex]
 	}
 
-	c.Lock()
-	c.index[h] = [2]int{now + expireSeconds, freeIdx}
-	c.Unlock()
+	bucket.Lock()
+	bucket.m[hashes[hashIndex]] = [2]int{now + expireSeconds, freeIdx}
+	bucket.Unlock()
 
 	c.c[freeIdx] = value
 	return nil
@@ -82,10 +101,12 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 var NotFoundError = errors.New("key not found")
 
 func (c *Cache) Get(key []byte) (TestValue, error) {
-	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
+	hashes := getHash(key)
+	bucket := c.idx[hashes[bucketIndex]]
+
+	bucket.RLock()
+	res, ok := bucket.m[hashes[hashIndex]]
+	bucket.RUnlock()
 
 	if !ok {
 		return TestValue{}, NotFoundError
@@ -95,7 +116,7 @@ func (c *Cache) Get(key []byte) (TestValue, error) {
 	valueIdx := res[valueIndex]
 
 	if (res[expiredIndex] - now) <= 0 {
-		c.delete(h, valueIdx)
+		c.delete(hashes)
 		return TestValue{}, NotFoundError
 	}
 
@@ -103,14 +124,16 @@ func (c *Cache) Get(key []byte) (TestValue, error) {
 }
 
 func (c *Cache) Delete(key []byte) {
-	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
+	hashes := getHash(key)
+	bucket := c.idx[hashes[bucketIndex]]
 
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
+	bucket.RLock()
+	res, ok := bucket.m[hashes[hashIndex]]
+	bucket.RUnlock()
+
+	bucket.Lock()
+	delete(bucket.m, hashes[hashIndex])
+	bucket.Unlock()
 
 	if !ok {
 		return
@@ -119,14 +142,16 @@ func (c *Cache) Delete(key []byte) {
 	c.pushFreeIndex(res[valueIndex])
 }
 
-func (c *Cache) delete(h uint64, valueIdx int) {
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
+func (c *Cache) delete(hashes [2]uint64) {
+	bucket := c.idx[hashes[bucketIndex]]
 
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
+	bucket.RLock()
+	res, ok := bucket.m[hashes[hashIndex]]
+	bucket.RUnlock()
+
+	bucket.Lock()
+	delete(bucket.m, hashes[hashIndex])
+	bucket.Unlock()
 
 	if !ok {
 		return
@@ -136,26 +161,35 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 }
 
 // FIXME Check locks distribution
-func (c *Cache) popFreeIndex() int {
-	c.freeIndexMutex.Lock()
-	if atomic.LoadInt32(c.freeCount) == 0 {
+func (c *Cache) popFreeIndex(bucketIdx uint64) int {
+	bucket := c.idx[bucketIdx]
+
+	c.freeIndexMutex.RLock()
+	freeIndexesCount := atomic.LoadInt32(c.freeCount)
+	c.freeIndexMutex.RUnlock()
+	if freeIndexesCount == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
 		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
 
 		i := 0
-		c.Lock()
-		for h, res := range c.index {
-			c.freeIndexes[res[valueIndex]] = struct{}{}
-			delete(c.index, h)
+		indexToFree := make([]int, freeBatchSize)
+		bucket.Lock()
+		for h, res := range bucket.m {
+			indexToFree[i] = res[valueIndex]
+			delete(bucket.m, h)
 
 			i++
 			if i >= freeBatchSize {
 				break
 			}
 		}
-		c.Unlock()
+		bucket.Unlock()
 
+		c.freeIndexMutex.Lock()
+		for _, idxToFree := range indexToFree {
+			c.freeIndexes[idxToFree] = struct{}{}
+		}
 		atomic.StoreInt32(c.freeCount, int32(i))
 		c.freeIndexMutex.Unlock()
 
@@ -171,6 +205,7 @@ func (c *Cache) popFreeIndex() int {
 		}
 	}
 
+	c.freeIndexMutex.Lock()
 	for idx := range c.freeIndexes {
 		delete(c.freeIndexes, idx)
 		atomic.AddInt32(c.freeCount, -1)
@@ -195,8 +230,6 @@ func (c *Cache) pushFreeIndex(key int) {
 }
 
 func (c *Cache) Flush() {
-	c.Lock()
-
 	c.freeIndexMutex.Lock()
 	for i := 0; i < cacheSize; i++ {
 		c.freeIndexes[i] = struct{}{}
@@ -204,8 +237,15 @@ func (c *Cache) Flush() {
 	atomic.StoreInt32(c.freeCount, cacheSize)
 	c.freeIndexMutex.Unlock()
 
-	c.index = make(map[uint64][2]int, cacheSize)
-	c.Unlock()
+	for idx, bucket := range c.idx {
+		mutex := sync.RWMutex{}
+		bucket.Lock()
+		c.idx[idx] =index{
+			&mutex,
+			make(map[uint64][2]int, cacheSize),
+		}
+		bucket.Unlock()
+	}
 }
 
 func (c *Cache) Len() int {
