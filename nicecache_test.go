@@ -10,6 +10,8 @@ import (
 
 var repeats = freeBatchSize - 1
 
+// TODO сделать тесты при кэше прогретом на 10, 30, 50, 100%
+
 func Benchmark_Cache_Circle_Set(b *testing.B) {
 	cache := NewNiceCache()
 

@@ -10,7 +10,7 @@ import (
 
 const (
 	cacheSize        = 1024 * 1024 * 10
-	freeBatchPercent = 10 // TODO: tune
+	freeBatchPercent = 1 // TODO: tune
 	expiredIndex     = 0
 	valueIndex       = 1
 
@@ -33,6 +33,9 @@ type Cache struct {
 	freeIndexMutex sync.RWMutex
 	freeIndexes    map[int]struct{}
 	freeCount      *int32
+
+	onClearing      *int32
+	onClearingMutex sync.RWMutex
 }
 
 // TODO: добавить логер, метрику в виде определяемых интерфейсов
@@ -44,11 +47,14 @@ func NewNiceCache() *Cache {
 
 	n := int32(cacheSize)
 	freeCount := &n
+
+	onClearing := int32(0)
 	return &Cache{
 		c:           [cacheSize]TestValue{},
 		index:       make(map[uint64][2]int, cacheSize),
 		freeIndexes: freeIndexes,
 		freeCount:   freeCount,
+		onClearing:  &onClearing,
 	}
 }
 
@@ -143,6 +149,13 @@ func (c *Cache) popFreeIndex() int {
 		// TODO заменить на lru?
 		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
 
+		// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
+		onClearing := atomic.LoadInt32(c.onClearing)
+		c.onClearingMutex.Lock()
+		if atomic.LoadInt32(c.onClearing) != onClearing {
+			goto cleaningDone
+		}
+
 		i := 0
 		c.Lock()
 		for h, res := range c.index {
@@ -155,6 +168,9 @@ func (c *Cache) popFreeIndex() int {
 			}
 		}
 		c.Unlock()
+
+		atomic.AddInt32(c.onClearing, 1)
+		c.onClearingMutex.Unlock()
 
 		atomic.StoreInt32(c.freeCount, int32(i))
 		c.freeIndexMutex.Unlock()
@@ -170,6 +186,7 @@ func (c *Cache) popFreeIndex() int {
 			freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
 		}
 	}
+cleaningDone:
 
 	for idx := range c.freeIndexes {
 		delete(c.freeIndexes, idx)
