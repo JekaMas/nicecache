@@ -149,6 +149,8 @@ func (c *Cache) popFreeIndex() int {
 		// TODO заменить на lru?
 		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
 
+		// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+
 		// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
 		onClearing := atomic.LoadInt32(c.onClearing)
 		c.onClearingMutex.Lock()

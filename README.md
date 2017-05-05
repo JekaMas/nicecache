@@ -1,10 +1,10 @@
 размер кэша 1024&times;1024
 ```
-Benchmark_Cache_Circle_Set-4                     3000000               391 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Set_Parallel-4            2000000               805 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get-4                     5000000               404 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get_Parallel-4           10000000               139 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_SetAndGet-4               3000000               508 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set-4                     3000000               391 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4            2000000               805 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get-4                     5000000               404 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4           10000000               139 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4               3000000               508 ns/op               0 B/op          0 allocs/op
 
      
 Benchmark_Cache_Struct_Set-4                     2000000               894 ns/op             219 B/op          1 allocs/op
@@ -16,11 +16,11 @@ Benchmark_Cache_Struct_SetAndGet-4               1000000              3247 ns/op
 
 размер кэша 1024&times;1024&times;10
 ```
-Benchmark_Cache_Circle_Set-4                     3000000               472 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Set_Parallel-4            2000000               715 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get-4                     3000000               416 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get_Parallel-4           10000000               167 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_SetAndGet-4               2000000               588 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set-4                     3000000               472 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4            2000000               715 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get-4                     3000000               416 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4           10000000               167 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4               2000000               588 ns/op               0 B/op          0 allocs/op
  
 Benchmark_Cache_Struct_Set-4                     1000000              2766 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              3243 ns/op             761 B/op          5 allocs/op
@@ -31,11 +31,11 @@ Benchmark_Cache_Struct_SetAndGet-4                300000              5638 ns/op
 
 размер кэша 1024&times;1024&times;10 - 16cpu
 ```
-Benchmark_Cache_Circle_Set-16                    3000000               488 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Set_Parallel-16           2000000               789 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get-16                    3000000               423 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_Get_Parallel-16          10000000               177 ns/op               0 B/op          0 allocs/op
-Benchmark_Cache_Circle_SetAndGet-16              2000000               633 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set-16                    3000000               488 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-16           2000000               789 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get-16                    3000000               423 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-16          10000000               177 ns/op               0 B/op          0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-16              2000000               633 ns/op               0 B/op          0 allocs/op
  
 Benchmark_Cache_Struct_Set-16                    1000000              4124 ns/op             793 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-16            300000              4828 ns/op             774 B/op          5 allocs/op

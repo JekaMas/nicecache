@@ -12,7 +12,7 @@ var repeats = freeBatchSize - 1
 
 // TODO сделать тесты при кэше прогретом на 10, 30, 50, 100%
 
-func Benchmark_Cache_Circle_Set(b *testing.B) {
+func Benchmark_Cache_Nice_Set(b *testing.B) {
 	cache := NewNiceCache()
 
 	keys := make([][]byte, repeats)
@@ -38,7 +38,7 @@ func Benchmark_Cache_Circle_Set(b *testing.B) {
 	}
 }
 
-func Benchmark_Cache_Circle_Set_Parallel(b *testing.B) {
+func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 	cache := NewNiceCache()
 
 	keys := make([][]byte, repeats)
@@ -68,7 +68,7 @@ func Benchmark_Cache_Circle_Set_Parallel(b *testing.B) {
 	}
 }
 
-func Benchmark_Cache_Circle_Get(b *testing.B) {
+func Benchmark_Cache_Nice_Get(b *testing.B) {
 	cache := NewNiceCache()
 
 	keys := make([][]byte, repeats)
@@ -102,7 +102,7 @@ func Benchmark_Cache_Circle_Get(b *testing.B) {
 	fmt.Fprint(ioutil.Discard, res.ID)
 }
 
-func Benchmark_Cache_Circle_Get_Parallel(b *testing.B) {
+func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 	cache := NewNiceCache()
 
 	keys := make([][]byte, repeats)
@@ -139,7 +139,7 @@ func Benchmark_Cache_Circle_Get_Parallel(b *testing.B) {
 	}
 }
 
-func Benchmark_Cache_Circle_SetAndGet(b *testing.B) {
+func Benchmark_Cache_Nice_SetAndGet(b *testing.B) {
 	cache := NewNiceCache()
 
 	keys := make([][]byte, repeats)
