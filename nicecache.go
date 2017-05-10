@@ -1,7 +1,6 @@
 package nicecache
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -10,7 +9,7 @@ import (
 
 const (
 	cacheSize        = 1024 * 1024 * 10
-	freeBatchPercent = 1 // TODO: tune
+	freeBatchPercent = 1
 	expiredIndex     = 0
 	valueIndex       = 1
 
@@ -18,15 +17,12 @@ const (
 	maxFreeRatePercent = 33
 )
 
-//TODO generate as const
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
-	// TODO сделать дополнительное разбиение кэша на buckets в зависимости от размера cacheSize
 	c [cacheSize]TestValue // Preallocated storage
 
-	// Разбить на массив [16][2]{sync.RWMutex, index map[uint64][2]int} разбивать по последним 4 битам uint64
 	sync.RWMutex
 	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
 
@@ -67,7 +63,6 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	c.RUnlock()
 
 	var freeIdx int
-	//TODO: учитывать, что ноды могут быть в разных часовых поясах
 	now := int(time.Now().Unix())
 
 	if !ok {
@@ -83,9 +78,6 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	c.c[freeIdx] = value
 	return nil
 }
-
-//TODO сделать нормальные ошибки
-var NotFoundError = errors.New("key not found")
 
 func (c *Cache) Get(key []byte) (TestValue, error) {
 	h := getHash(key)
@@ -147,8 +139,6 @@ func (c *Cache) popFreeIndex() int {
 	if atomic.LoadInt32(c.freeCount) == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
-		// TODO запускать в горутине? Сделать логику зависимой от размера кэша?
-
 		// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
 
 		// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
@@ -177,7 +167,7 @@ func (c *Cache) popFreeIndex() int {
 		atomic.StoreInt32(c.freeCount, int32(i))
 		c.freeIndexMutex.Unlock()
 
-		// Рост freeBatchSize прогрессивный
+		// Increase freeBatchSize progressive
 		var freeBatchSizeDelta int = freeBatchSize * alpha / 100
 		if freeBatchSizeDelta < 1 {
 			freeBatchSizeDelta = 1
@@ -230,5 +220,3 @@ func (c *Cache) Flush() {
 func (c *Cache) Len() int {
 	return cacheSize - int(atomic.LoadInt32(c.freeCount))
 }
-
-//TODO batch get, set, delete ?
