@@ -1,7 +1,6 @@
 package nicecache
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +27,7 @@ type Cache struct {
 	index       *syncmap.Map // map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
 	freeIndexes *syncmap.Map // map[int]struct{}
 	freeCount   *int32
+	freeIndexCh    chan int
 
 	onClearing      *int32
 	onClearingMutex sync.RWMutex
@@ -50,11 +50,12 @@ func NewNiceCache() *Cache {
 		freeIndexes: &freeIndexes,   //freeIndexes,
 		freeCount:   freeCount,
 		onClearing:  &onClearing,
+		freeIndexCh: make(chan int, (cacheSize*maxFreeRatePercent)/100),
 	}
 }
 
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
-// TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
+func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	//TODO: сделать в генераторе отдельный параметр, копировать ли получаемое значение. Если он выставлен, то делать копию получаемого значения.
 
@@ -77,30 +78,6 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	c.c[res[valueIndex]] = value
 	return nil
 }
-/*
-func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
-	//TODO: сделать в генераторе отдельный параметр, копировать ли получаемое значение. Если он выставлен, то делать копию получаемого значения.
-
-	h := getHash(key)
-	res, ok := c.index.Load(h)
-	_ = res
-
-	var freeIdx int
-	now := int(time.Now().Unix())
-
-	if !ok {
-		freeIdx = c.popFreeIndex()
-	} else {
-		//freeIdx = res.([2]int)[valueIndex]
-		freeIdx = 1
-	}
-
-	c.index.Store(h, [2]int{now + expireSeconds, freeIdx})
-
-	c.c[freeIdx] = value
-	return nil
-}
-*/
 
 func (c *Cache) Get(key []byte) (*TestValue, error) {
 	h := getHash(key)
@@ -147,20 +124,24 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 // FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
 	if atomic.LoadInt32(c.freeCount) == 0 {
-		// Если индексы иссякли, то считаем свободными процент от записей.
-		// TODO заменить на lru?
-		// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+		go func() {
+			// Если индексы иссякли, то считаем свободными процент от записей.
+			// TODO заменить на lru?
+			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
 
-		// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
-		onClearing := atomic.LoadInt32(c.onClearing)
-		c.onClearingMutex.Lock()
-		if atomic.LoadInt32(c.onClearing) != onClearing {
-			goto cleaningDone
-		}
+			// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
+			onClearing := atomic.LoadInt32(c.onClearing)
+			c.onClearingMutex.Lock()
+			if atomic.LoadInt32(c.onClearing) != onClearing {
+				c.onClearingMutex.Unlock()
+				return
+			}
 
 		i := 0
 		c.index.Range(func(k, res interface{}) bool {
-			c.freeIndexes.Store(res.([2]int)[valueIndex], struct{}{})
+			v := res.([2]int)[valueIndex]
+			c.freeIndexCh <- v
+			c.freeIndexes.Store(v, struct{}{})
 			c.index.Delete(k)
 
 			i++
@@ -170,23 +151,25 @@ func (c *Cache) popFreeIndex() int {
 			return true
 		})
 
-		atomic.AddInt32(c.onClearing, 1)
-		c.onClearingMutex.Unlock()
+			atomic.AddInt32(c.onClearing, 1)
+			c.onClearingMutex.Unlock()
 
-		atomic.StoreInt32(c.freeCount, int32(i))
+			atomic.StoreInt32(c.freeCount, int32(i))
 
-		// Increase freeBatchSize progressive
-		var freeBatchSizeDelta int = freeBatchSize * alpha / 100
-		if freeBatchSizeDelta < 1 {
-			freeBatchSizeDelta = 1
-		}
+			// Increase freeBatchSize progressive
+			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
+			if freeBatchSizeDelta < 1 {
+				freeBatchSizeDelta = 1
+			}
 
-		freeBatchSize += freeBatchSizeDelta
-		if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
-			freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
-		}
+			freeBatchSize += freeBatchSizeDelta
+			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
+				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+			}
+
+			return
+		}()
 	}
-cleaningDone:
 
 	idx := -1
 	c.freeIndexes.Range(func(k, res interface{}) bool {
@@ -197,11 +180,20 @@ cleaningDone:
 		return false
 	})
 
-
-	if idx == -1 {
-		//DEBUG
-		panic(fmt.Sprintf("shit happens: %v", c.freeIndexes))
+	var idx int
+	if atomic.LoadInt32(c.freeCount) == 0 {
+		idx = <-c.freeIndexCh
+		c.freeIndexMutex.Lock()
+	} else {
+		c.freeIndexMutex.Lock()
+		for idx = range c.freeIndexes {
+			break
+		}
 	}
+	delete(c.freeIndexes, idx)
+	c.freeIndexMutex.Unlock()
+
+	atomic.AddInt32(c.freeCount, -1)
 
 	return idx
 }
