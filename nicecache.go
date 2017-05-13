@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/golang/sync/syncmap"
 )
 
 const (
@@ -21,14 +23,11 @@ var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
-	c [cacheSize]TestValue // Preallocated storage
+	c [cacheSize]*TestValue // Preallocated storage
 
-	sync.RWMutex
-	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
-
-	freeIndexMutex sync.RWMutex
-	freeIndexes    map[int]struct{}
-	freeCount      *int32
+	index       *syncmap.Map // map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+	freeIndexes *syncmap.Map // map[int]struct{}
+	freeCount   *int32
 
 	onClearing      *int32
 	onClearingMutex sync.RWMutex
@@ -36,9 +35,9 @@ type Cache struct {
 
 // TODO: добавить логер, метрику в виде определяемых интерфейсов
 func NewNiceCache() *Cache {
-	freeIndexes := make(map[int]struct{}, cacheSize)
+	freeIndexes := syncmap.Map{} //make(map[int]struct{}, cacheSize)
 	for i := 0; i < cacheSize; i++ {
-		freeIndexes[i] = struct{}{}
+		freeIndexes.Store(i, struct{}{})
 	}
 
 	n := int32(cacheSize)
@@ -46,9 +45,9 @@ func NewNiceCache() *Cache {
 
 	onClearing := int32(0)
 	return &Cache{
-		c:           [cacheSize]TestValue{},
-		index:       make(map[uint64][2]int, cacheSize),
-		freeIndexes: freeIndexes,
+		c:           [cacheSize]*TestValue{},
+		index:       &syncmap.Map{}, //make(map[uint64][2]int, cacheSize),
+		freeIndexes: &freeIndexes,   //freeIndexes,
 		freeCount:   freeCount,
 		onClearing:  &onClearing,
 	}
@@ -56,11 +55,35 @@ func NewNiceCache() *Cache {
 
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
 // TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
-func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
+func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
+	//TODO: сделать в генераторе отдельный параметр, копировать ли получаемое значение. Если он выставлен, то делать копию получаемого значения.
+
 	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
+	resIntf, ok := c.index.Load(h)
+	var res [2]int
+	if resIntf != nil {
+		res = resIntf.([2]int)
+	}
+
+	if !ok {
+		res[valueIndex] = c.popFreeIndex()
+	}
+
+	now := int(time.Now().Unix())
+	res[expiredIndex] = now + expireSeconds
+
+	c.index.Store(h, res)
+
+	c.c[res[valueIndex]] = value
+	return nil
+}
+/*
+func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
+	//TODO: сделать в генераторе отдельный параметр, копировать ли получаемое значение. Если он выставлен, то делать копию получаемого значения.
+
+	h := getHash(key)
+	res, ok := c.index.Load(h)
+	_ = res
 
 	var freeIdx int
 	now := int(time.Now().Unix())
@@ -68,33 +91,31 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	if !ok {
 		freeIdx = c.popFreeIndex()
 	} else {
-		freeIdx = res[valueIndex]
+		//freeIdx = res.([2]int)[valueIndex]
+		freeIdx = 1
 	}
 
-	c.Lock()
-	c.index[h] = [2]int{now + expireSeconds, freeIdx}
-	c.Unlock()
+	c.index.Store(h, [2]int{now + expireSeconds, freeIdx})
 
 	c.c[freeIdx] = value
 	return nil
 }
+*/
 
-func (c *Cache) Get(key []byte) (TestValue, error) {
+func (c *Cache) Get(key []byte) (*TestValue, error) {
 	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
-
+	resIntf, ok := c.index.Load(h)
 	if !ok {
-		return TestValue{}, NotFoundError
+		return nil, NotFoundError
 	}
 
 	now := int(time.Now().Unix())
+	res := resIntf.([2]int)
 	valueIdx := res[valueIndex]
 
 	if (res[expiredIndex] - now) <= 0 {
 		c.delete(h, valueIdx)
-		return TestValue{}, NotFoundError
+		return nil, NotFoundError
 	}
 
 	return c.c[valueIdx], nil
@@ -102,40 +123,29 @@ func (c *Cache) Get(key []byte) (TestValue, error) {
 
 func (c *Cache) Delete(key []byte) {
 	h := getHash(key)
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
-
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
-
+	res, ok := c.index.Load(h)
 	if !ok {
 		return
 	}
 
-	c.pushFreeIndex(res[valueIndex])
+	c.index.Delete(h)
+
+	c.pushFreeIndex(res.([2]int)[valueIndex])
 }
 
 func (c *Cache) delete(h uint64, valueIdx int) {
-	c.RLock()
-	res, ok := c.index[h]
-	c.RUnlock()
-
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
-
+	res, ok := c.index.Load(h)
 	if !ok {
 		return
 	}
 
-	c.pushFreeIndex(res[valueIndex])
+	c.index.Delete(h)
+
+	c.pushFreeIndex(res.([2]int)[valueIndex])
 }
 
 // FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
-	c.freeIndexMutex.Lock()
 	if atomic.LoadInt32(c.freeCount) == 0 {
 		// Если индексы иссякли, то считаем свободными процент от записей.
 		// TODO заменить на lru?
@@ -149,23 +159,21 @@ func (c *Cache) popFreeIndex() int {
 		}
 
 		i := 0
-		c.Lock()
-		for h, res := range c.index {
-			c.freeIndexes[res[valueIndex]] = struct{}{}
-			delete(c.index, h)
+		c.index.Range(func(k, res interface{}) bool {
+			c.freeIndexes.Store(res.([2]int)[valueIndex], struct{}{})
+			c.index.Delete(k)
 
 			i++
 			if i >= freeBatchSize {
-				break
+				return false
 			}
-		}
-		c.Unlock()
+			return true
+		})
 
 		atomic.AddInt32(c.onClearing, 1)
 		c.onClearingMutex.Unlock()
 
 		atomic.StoreInt32(c.freeCount, int32(i))
-		c.freeIndexMutex.Unlock()
 
 		// Increase freeBatchSize progressive
 		var freeBatchSizeDelta int = freeBatchSize * alpha / 100
@@ -180,41 +188,35 @@ func (c *Cache) popFreeIndex() int {
 	}
 cleaningDone:
 
-	for idx := range c.freeIndexes {
-		delete(c.freeIndexes, idx)
+	idx := -1
+	c.freeIndexes.Range(func(k, res interface{}) bool {
+		idx = k.(int)
+		c.freeIndexes.Delete(k)
 		atomic.AddInt32(c.freeCount, -1)
-		c.freeIndexMutex.Unlock()
 
-		return idx
+		return false
+	})
+
+
+	if idx == -1 {
+		//DEBUG
+		panic(fmt.Sprintf("shit happens: %v", c.freeIndexes))
 	}
-	c.freeIndexMutex.Unlock()
 
-	//DEBUG
-	panic(fmt.Sprintf("shit happens: %v", c.freeIndexes))
-
-	return 0
+	return idx
 }
 
 func (c *Cache) pushFreeIndex(key int) {
-	c.freeIndexMutex.Lock()
-	c.freeIndexes[key] = struct{}{}
+	c.freeIndexes.Store(key, struct{}{})
 	atomic.AddInt32(c.freeCount, 1)
-	c.freeIndexMutex.Unlock()
-
 }
 
 func (c *Cache) Flush() {
-	c.Lock()
-
-	c.freeIndexMutex.Lock()
 	for i := 0; i < cacheSize; i++ {
-		c.freeIndexes[i] = struct{}{}
+		c.freeIndexes.Store(i, struct{}{})
 	}
 	atomic.StoreInt32(c.freeCount, cacheSize)
-	c.freeIndexMutex.Unlock()
-
-	c.index = make(map[uint64][2]int, cacheSize)
-	c.Unlock()
+	c.index = &syncmap.Map{}
 }
 
 func (c *Cache) Len() int {
