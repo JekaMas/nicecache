@@ -24,10 +24,11 @@ var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 type Cache struct {
 	c [cacheSize]*TestValue // Preallocated storage
 
-	index       *syncmap.Map // map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
-	freeIndexes *syncmap.Map // map[int]struct{}
+	indexMap    *syncmap.Map      // map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+	index       [cacheSize][2]int // map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+	freeIndexes *syncmap.Map      // map[int]struct{}
 	freeCount   *int32
-	freeIndexCh    chan int
+	freeIndexCh chan int
 
 	onClearing      *int32
 	onClearingMutex sync.RWMutex
@@ -46,7 +47,7 @@ func NewNiceCache() *Cache {
 	onClearing := int32(0)
 	return &Cache{
 		c:           [cacheSize]*TestValue{},
-		index:       &syncmap.Map{}, //make(map[uint64][2]int, cacheSize),
+		indexMap:    &syncmap.Map{}, //make(map[uint64][2]int, cacheSize),
 		freeIndexes: &freeIndexes,   //freeIndexes,
 		freeCount:   freeCount,
 		onClearing:  &onClearing,
@@ -56,41 +57,41 @@ func NewNiceCache() *Cache {
 
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
-func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	//TODO: сделать в генераторе отдельный параметр, копировать ли получаемое значение. Если он выставлен, то делать копию получаемого значения.
-
+	var resIndex int
 	h := getHash(key)
-	resIntf, ok := c.index.Load(h)
-	var res [2]int
-	if resIntf != nil {
-		res = resIntf.([2]int)
+
+	resIndexIntf, ok := c.indexMap.Load(h)
+	if resIndexIntf != nil {
+		resIndex = resIndexIntf.(int)
 	}
 
 	if !ok {
-		res[valueIndex] = c.popFreeIndex()
+		resIndex = c.popFreeIndex()
 	}
 
+	c.index[resIndex][valueIndex] = resIndex
 	now := int(time.Now().Unix())
-	res[expiredIndex] = now + expireSeconds
+	c.index[resIndex][expiredIndex] = now + expireSeconds
 
-	c.index.Store(h, res)
+	c.indexMap.Store(h, resIndex)
 
-	c.c[res[valueIndex]] = value
+	c.c[c.index[resIndex][valueIndex]] = value
 	return nil
 }
 
 func (c *Cache) Get(key []byte) (*TestValue, error) {
 	h := getHash(key)
-	resIntf, ok := c.index.Load(h)
+	resIndexIntf, ok := c.indexMap.Load(h)
 	if !ok {
 		return nil, NotFoundError
 	}
 
 	now := int(time.Now().Unix())
-	res := resIntf.([2]int)
-	valueIdx := res[valueIndex]
+	resIndex := resIndexIntf.(int)
+	valueIdx := c.index[resIndex][valueIndex]
 
-	if (res[expiredIndex] - now) <= 0 {
+	if (c.index[resIndex][expiredIndex] - now) <= 0 {
 		c.delete(h, valueIdx)
 		return nil, NotFoundError
 	}
@@ -100,25 +101,25 @@ func (c *Cache) Get(key []byte) (*TestValue, error) {
 
 func (c *Cache) Delete(key []byte) {
 	h := getHash(key)
-	res, ok := c.index.Load(h)
+	res, ok := c.indexMap.Load(h)
 	if !ok {
 		return
 	}
 
-	c.index.Delete(h)
+	c.indexMap.Delete(h)
 
 	c.pushFreeIndex(res.([2]int)[valueIndex])
 }
 
 func (c *Cache) delete(h uint64, valueIdx int) {
-	res, ok := c.index.Load(h)
+	resIndexIntf, ok := c.indexMap.Load(h)
 	if !ok {
 		return
 	}
 
-	c.index.Delete(h)
-
-	c.pushFreeIndex(res.([2]int)[valueIndex])
+	c.indexMap.Delete(h)
+	resIndex := resIndexIntf.(int)
+	c.pushFreeIndex(c.index[resIndex][valueIndex])
 }
 
 // FIXME Check locks distribution
@@ -137,19 +138,20 @@ func (c *Cache) popFreeIndex() int {
 				return
 			}
 
-		i := 0
-		c.index.Range(func(k, res interface{}) bool {
-			v := res.([2]int)[valueIndex]
-			c.freeIndexCh <- v
-			c.freeIndexes.Store(v, struct{}{})
-			c.index.Delete(k)
+			i := 0
+			c.indexMap.Range(func(k, res interface{}) bool {
+				resIndex := res.(int)
+				v := c.index[resIndex][valueIndex]
+				c.freeIndexCh <- v
+				c.freeIndexes.Store(v, struct{}{})
+				c.indexMap.Delete(k)
 
-			i++
-			if i >= freeBatchSize {
-				return false
-			}
-			return true
-		})
+				i++
+				if i >= freeBatchSize {
+					return false
+				}
+				return true
+			})
 
 			atomic.AddInt32(c.onClearing, 1)
 			c.onClearingMutex.Unlock()
@@ -171,27 +173,16 @@ func (c *Cache) popFreeIndex() int {
 		}()
 	}
 
-	idx := -1
-	c.freeIndexes.Range(func(k, res interface{}) bool {
-		idx = k.(int)
-		c.freeIndexes.Delete(k)
-		atomic.AddInt32(c.freeCount, -1)
-
-		return false
-	})
-
 	var idx int
 	if atomic.LoadInt32(c.freeCount) == 0 {
 		idx = <-c.freeIndexCh
-		c.freeIndexMutex.Lock()
 	} else {
-		c.freeIndexMutex.Lock()
-		for idx = range c.freeIndexes {
-			break
-		}
+		c.freeIndexes.Range(func(k, res interface{}) bool {
+			idx = k.(int)
+			return false
+		})
 	}
-	delete(c.freeIndexes, idx)
-	c.freeIndexMutex.Unlock()
+	c.freeIndexes.Delete(idx)
 
 	atomic.AddInt32(c.freeCount, -1)
 
@@ -208,7 +199,7 @@ func (c *Cache) Flush() {
 		c.freeIndexes.Store(i, struct{}{})
 	}
 	atomic.StoreInt32(c.freeCount, cacheSize)
-	c.index = &syncmap.Map{}
+	c.indexMap = &syncmap.Map{}
 }
 
 func (c *Cache) Len() int {
