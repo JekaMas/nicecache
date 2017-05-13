@@ -1,7 +1,6 @@
 package nicecache
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +20,7 @@ var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
-	c [cacheSize]TestValue // Preallocated storage
+	c [cacheSize]*TestValue // Preallocated storage
 
 	sync.RWMutex
 	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
@@ -29,6 +28,7 @@ type Cache struct {
 	freeIndexMutex sync.RWMutex
 	freeIndexes    map[int]struct{}
 	freeCount      *int32
+	freeIndexCh    chan int
 
 	onClearing      *int32
 	onClearingMutex sync.RWMutex
@@ -46,17 +46,17 @@ func NewNiceCache() *Cache {
 
 	onClearing := int32(0)
 	return &Cache{
-		c:           [cacheSize]TestValue{},
+		c:           [cacheSize]*TestValue{},
 		index:       make(map[uint64][2]int, cacheSize),
 		freeIndexes: freeIndexes,
 		freeCount:   freeCount,
 		onClearing:  &onClearing,
+		freeIndexCh: make(chan int, (cacheSize*maxFreeRatePercent)/100),
 	}
 }
 
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
-// TODO возможно принимать не duration для expireSeconds а время, когда истечет кэш - по аналогии с context
-func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
+func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	h := getHash(key)
 	c.RLock()
 	res, ok := c.index[h]
@@ -79,14 +79,14 @@ func (c *Cache) Set(key []byte, value TestValue, expireSeconds int) error {
 	return nil
 }
 
-func (c *Cache) Get(key []byte) (TestValue, error) {
+func (c *Cache) Get(key []byte) (*TestValue, error) {
 	h := getHash(key)
 	c.RLock()
 	res, ok := c.index[h]
 	c.RUnlock()
 
 	if !ok {
-		return TestValue{}, NotFoundError
+		return nil, NotFoundError
 	}
 
 	now := int(time.Now().Unix())
@@ -94,7 +94,7 @@ func (c *Cache) Get(key []byte) (TestValue, error) {
 
 	if (res[expiredIndex] - now) <= 0 {
 		c.delete(h, valueIdx)
-		return TestValue{}, NotFoundError
+		return nil, NotFoundError
 	}
 
 	return c.c[valueIdx], nil
@@ -135,64 +135,72 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 
 // FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
-	c.freeIndexMutex.Lock()
 	if atomic.LoadInt32(c.freeCount) == 0 {
-		// Если индексы иссякли, то считаем свободными процент от записей.
-		// TODO заменить на lru?
-		// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+		go func() {
+			// Если индексы иссякли, то считаем свободными процент от записей.
+			// TODO заменить на lru?
+			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
 
-		// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
-		onClearing := atomic.LoadInt32(c.onClearing)
-		c.onClearingMutex.Lock()
-		if atomic.LoadInt32(c.onClearing) != onClearing {
-			goto cleaningDone
-		}
-
-		i := 0
-		c.Lock()
-		for h, res := range c.index {
-			c.freeIndexes[res[valueIndex]] = struct{}{}
-			delete(c.index, h)
-
-			i++
-			if i >= freeBatchSize {
-				break
+			// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
+			onClearing := atomic.LoadInt32(c.onClearing)
+			c.onClearingMutex.Lock()
+			if atomic.LoadInt32(c.onClearing) != onClearing {
+				c.onClearingMutex.Unlock()
+				return
 			}
-		}
-		c.Unlock()
 
-		atomic.AddInt32(c.onClearing, 1)
-		c.onClearingMutex.Unlock()
+			i := 0
+			c.freeIndexMutex.Lock()
+			c.Lock()
+			for h, res := range c.index {
+				c.freeIndexCh <- res[valueIndex]
+				c.freeIndexes[res[valueIndex]] = struct{}{}
+				delete(c.index, h)
 
-		atomic.StoreInt32(c.freeCount, int32(i))
-		c.freeIndexMutex.Unlock()
+				i++
+				if i >= freeBatchSize {
+					break
+				}
+			}
+			c.Unlock()
+			c.freeIndexMutex.Unlock()
 
-		// Increase freeBatchSize progressive
-		var freeBatchSizeDelta int = freeBatchSize * alpha / 100
-		if freeBatchSizeDelta < 1 {
-			freeBatchSizeDelta = 1
-		}
+			atomic.AddInt32(c.onClearing, 1)
+			c.onClearingMutex.Unlock()
 
-		freeBatchSize += freeBatchSizeDelta
-		if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
-			freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+			atomic.StoreInt32(c.freeCount, int32(i))
+
+			// Increase freeBatchSize progressive
+			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
+			if freeBatchSizeDelta < 1 {
+				freeBatchSizeDelta = 1
+			}
+
+			freeBatchSize += freeBatchSizeDelta
+			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
+				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+			}
+
+			return
+		}()
+	}
+
+	var idx int
+	if atomic.LoadInt32(c.freeCount) == 0 {
+		idx = <-c.freeIndexCh
+		c.freeIndexMutex.Lock()
+	} else {
+		c.freeIndexMutex.Lock()
+		for idx = range c.freeIndexes {
+			break
 		}
 	}
-cleaningDone:
-
-	for idx := range c.freeIndexes {
-		delete(c.freeIndexes, idx)
-		atomic.AddInt32(c.freeCount, -1)
-		c.freeIndexMutex.Unlock()
-
-		return idx
-	}
+	delete(c.freeIndexes, idx)
 	c.freeIndexMutex.Unlock()
 
-	//DEBUG
-	panic(fmt.Sprintf("shit happens: %v", c.freeIndexes))
+	atomic.AddInt32(c.freeCount, -1)
 
-	return 0
+	return idx
 }
 
 func (c *Cache) pushFreeIndex(key int) {
