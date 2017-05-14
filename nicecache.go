@@ -169,9 +169,11 @@ func (c *Cache) popFreeIndex() int {
 	return idx
 }
 
+// TODO tune it
+const updateFreeIndexesChinkSize = 50
+
 func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struct{}) {
-	// TODO tune it
-	freeIndexChunk := make([]int, 0, 100)
+	freeIndexChunk := make([]int, 0, updateFreeIndexesChinkSize)
 
 	for {
 		select {
@@ -183,7 +185,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 			c.Lock()
 			for h, res := range c.index {
 				freeIndexChunk = append(freeIndexChunk, res[valueIndex])
-				if i%100 == 0 {
+				if i%updateFreeIndexesChinkSize == 0 {
 					c.freeIndexMutex.Lock()
 					c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
 					c.freeIndexMutex.Unlock()
@@ -204,10 +206,13 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 			}
 			c.Unlock()
 
-			c.freeIndexMutex.Lock()
-			c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
-			c.freeIndexMutex.Unlock()
-			freeIndexChunk = freeIndexChunk[:0]
+			// если что-то осталось для обновления свободных индексов, то добираем
+			if len(freeIndexChunk) > 0 {
+				c.freeIndexMutex.Lock()
+				c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
+				c.freeIndexMutex.Unlock()
+				freeIndexChunk = freeIndexChunk[:0]
+			}
 
 			atomic.StoreInt32(c.freeCount, int32(i))
 
