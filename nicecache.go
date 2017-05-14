@@ -153,13 +153,15 @@ func (c *Cache) popFreeIndex() int {
 	var idx int
 	if atomic.LoadInt32(c.freeCount) == 0 {
 		idx = <-c.freeIndexCh
-		c.freeIndexMutex.Lock()
 	} else {
-		c.freeIndexMutex.Lock()
+		c.freeIndexMutex.RLock()
 		for idx = range c.freeIndexes {
 			break
 		}
+		c.freeIndexMutex.RUnlock()
 	}
+
+	c.freeIndexMutex.Lock()
 	delete(c.freeIndexes, idx)
 	c.freeIndexMutex.Unlock()
 
@@ -214,9 +216,9 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan int) 
 func (c *Cache) pushFreeIndex(key int) {
 	c.freeIndexMutex.Lock()
 	c.freeIndexes[key] = struct{}{}
-	atomic.AddInt32(c.freeCount, 1)
 	c.freeIndexMutex.Unlock()
 
+	atomic.AddInt32(c.freeCount, 1)
 }
 
 func (c *Cache) Flush() {
