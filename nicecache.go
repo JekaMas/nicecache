@@ -136,53 +136,8 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 // FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
 	if atomic.LoadInt32(c.freeCount) == 0 {
-		go func() {
-			// Если индексы иссякли, то считаем свободными процент от записей.
-			// TODO заменить на lru?
-			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
-
-			// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
-			onClearing := atomic.LoadInt32(c.onClearing)
-			c.onClearingMutex.Lock()
-			if atomic.LoadInt32(c.onClearing) != onClearing {
-				c.onClearingMutex.Unlock()
-				return
-			}
-
-			i := 0
-			c.freeIndexMutex.Lock()
-			c.Lock()
-			for h, res := range c.index {
-				c.freeIndexCh <- res[valueIndex]
-				c.freeIndexes[res[valueIndex]] = struct{}{}
-				delete(c.index, h)
-
-				i++
-				if i >= freeBatchSize {
-					break
-				}
-			}
-			c.Unlock()
-			c.freeIndexMutex.Unlock()
-
-			atomic.AddInt32(c.onClearing, 1)
-			c.onClearingMutex.Unlock()
-
-			atomic.StoreInt32(c.freeCount, int32(i))
-
-			// Increase freeBatchSize progressive
-			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
-			if freeBatchSizeDelta < 1 {
-				freeBatchSizeDelta = 1
-			}
-
-			freeBatchSize += freeBatchSizeDelta
-			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
-				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
-			}
-
-			return
-		}()
+		// Если индексы иссякли, то считаем свободными процент от записей.
+		go c.clearCache(c.freeIndexCh)
 	}
 
 	var idx int
@@ -201,6 +156,53 @@ func (c *Cache) popFreeIndex() int {
 	atomic.AddInt32(c.freeCount, -1)
 
 	return idx
+}
+
+func (c *Cache) clearCache(freeIndexCh chan int) {
+	// TODO заменить на lru?
+	// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+
+	// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
+	onClearing := atomic.LoadInt32(c.onClearing)
+	c.onClearingMutex.Lock()
+	if atomic.LoadInt32(c.onClearing) != onClearing {
+		c.onClearingMutex.Unlock()
+		return
+	}
+	atomic.AddInt32(c.onClearing, 1)
+	c.onClearingMutex.Unlock()
+
+	i := 0
+	c.freeIndexMutex.Lock()
+	c.Lock()
+	for h, res := range c.index {
+		freeIndexCh <- res[valueIndex]
+		c.freeIndexes[res[valueIndex]] = struct{}{}
+		delete(c.index, h)
+
+		i++
+		if i >= freeBatchSize {
+			break
+		}
+	}
+
+	c.Unlock()
+	c.freeIndexMutex.Unlock()
+
+	atomic.StoreInt32(c.freeCount, int32(i))
+
+	// Increase freeBatchSize progressive
+	var freeBatchSizeDelta int = freeBatchSize * alpha / 100
+	if freeBatchSizeDelta < 1 {
+		freeBatchSizeDelta = 1
+	}
+
+	freeBatchSize += freeBatchSizeDelta
+	if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
+		freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+	}
+
+	return
 }
 
 func (c *Cache) pushFreeIndex(key int) {
