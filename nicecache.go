@@ -31,7 +31,9 @@ type Cache struct {
 	freeIndexCh    chan int
 
 	onClearing      *int32
-	onClearingMutex sync.RWMutex
+	startClearingCh chan struct{}
+
+	stop chan struct{}
 }
 
 // TODO: добавить логер, метрику в виде определяемых интерфейсов
@@ -45,14 +47,20 @@ func NewNiceCache() *Cache {
 	freeCount := &n
 
 	onClearing := int32(0)
-	return &Cache{
-		c:           [cacheSize]*TestValue{},
-		index:       make(map[uint64][2]int, cacheSize),
-		freeIndexes: freeIndexes,
-		freeCount:   freeCount,
-		onClearing:  &onClearing,
-		freeIndexCh: make(chan int, (cacheSize*maxFreeRatePercent)/100),
+	c := &Cache{
+		c:               [cacheSize]*TestValue{},
+		index:           make(map[uint64][2]int, cacheSize),
+		freeIndexes:     freeIndexes,
+		freeCount:       freeCount,
+		onClearing:      &onClearing,
+		freeIndexCh:     make(chan int, (cacheSize*maxFreeRatePercent)/100),
+		startClearingCh: make(chan struct{}, 1),
+		stop:            make(chan struct{}, 1), //TODO: close it when stop Cache
 	}
+
+	go c.clearCache(c.startClearingCh, c.freeIndexCh)
+
+	return c
 }
 
 // TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
@@ -135,9 +143,11 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 
 // FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
+	// Если индексы иссякли, то считаем свободными процент от записей.
 	if atomic.LoadInt32(c.freeCount) == 0 {
-		// Если индексы иссякли, то считаем свободными процент от записей.
-		go c.clearCache(c.freeIndexCh)
+		if atomic.CompareAndSwapInt32(c.onClearing, 0, 1) {
+			c.startClearingCh <- struct{}{}
+		}
 	}
 
 	var idx int
@@ -158,51 +168,47 @@ func (c *Cache) popFreeIndex() int {
 	return idx
 }
 
-func (c *Cache) clearCache(freeIndexCh chan int) {
-	// TODO заменить на lru?
-	// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan int) {
+	for {
+		select {
+		case <-startClearingCh:
+			// TODO заменить на lru?
+			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
+			i := 0
+			c.freeIndexMutex.Lock()
+			c.Lock()
+			for h, res := range c.index {
+				freeIndexCh <- res[valueIndex]
+				c.freeIndexes[res[valueIndex]] = struct{}{}
+				delete(c.index, h)
 
-	// все горутины берут значение onClearing, но только одна горутина увеличит c.onClearing
-	onClearing := atomic.LoadInt32(c.onClearing)
-	c.onClearingMutex.Lock()
-	if atomic.LoadInt32(c.onClearing) != onClearing {
-		c.onClearingMutex.Unlock()
-		return
-	}
-	atomic.AddInt32(c.onClearing, 1)
-	c.onClearingMutex.Unlock()
+				i++
+				if i >= freeBatchSize {
+					break
+				}
+			}
 
-	i := 0
-	c.freeIndexMutex.Lock()
-	c.Lock()
-	for h, res := range c.index {
-		freeIndexCh <- res[valueIndex]
-		c.freeIndexes[res[valueIndex]] = struct{}{}
-		delete(c.index, h)
+			c.Unlock()
+			c.freeIndexMutex.Unlock()
 
-		i++
-		if i >= freeBatchSize {
-			break
+			atomic.StoreInt32(c.freeCount, int32(i))
+
+			// Increase freeBatchSize progressive
+			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
+			if freeBatchSizeDelta < 1 {
+				freeBatchSizeDelta = 1
+			}
+
+			freeBatchSize += freeBatchSizeDelta
+			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
+				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+			}
+
+			atomic.StoreInt32(c.onClearing, 0)
+		case <-c.stop:
+			return
 		}
 	}
-
-	c.Unlock()
-	c.freeIndexMutex.Unlock()
-
-	atomic.StoreInt32(c.freeCount, int32(i))
-
-	// Increase freeBatchSize progressive
-	var freeBatchSizeDelta int = freeBatchSize * alpha / 100
-	if freeBatchSizeDelta < 1 {
-		freeBatchSizeDelta = 1
-	}
-
-	freeBatchSize += freeBatchSizeDelta
-	if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
-		freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
-	}
-
-	return
 }
 
 func (c *Cache) pushFreeIndex(key int) {
