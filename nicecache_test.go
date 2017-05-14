@@ -14,6 +14,7 @@ var repeats = freeBatchSize - 1
 
 func Benchmark_Cache_Nice_Set(b *testing.B) {
 	cache := NewNiceCache()
+	defer cache.Close()
 
 	keys := make([][]byte, repeats)
 	values := make([]*TestValue, repeats)
@@ -40,6 +41,7 @@ func Benchmark_Cache_Nice_Set(b *testing.B) {
 
 func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 	cache := NewNiceCache()
+	defer cache.Close()
 
 	keys := make([][]byte, repeats)
 	values := make([]*TestValue, repeats)
@@ -70,6 +72,7 @@ func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 
 func Benchmark_Cache_Nice_Get(b *testing.B) {
 	cache := NewNiceCache()
+	defer cache.Close()
 
 	keys := make([][]byte, repeats)
 	values := make([]*TestValue, repeats)
@@ -104,6 +107,7 @@ func Benchmark_Cache_Nice_Get(b *testing.B) {
 
 func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 	cache := NewNiceCache()
+	defer cache.Close()
 
 	keys := make([][]byte, repeats)
 	values := make([]*TestValue, repeats)
@@ -141,6 +145,7 @@ func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 
 func Benchmark_Cache_Nice_SetAndGet(b *testing.B) {
 	cache := NewNiceCache()
+	defer cache.Close()
 
 	keys := make([][]byte, repeats)
 	values := make([]*TestValue, repeats)

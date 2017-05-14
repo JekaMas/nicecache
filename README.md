@@ -15,12 +15,12 @@ Benchmark_Cache_Struct_SetAndGet-4               1000000              3247 ns/op
 
 размер кэша 1024&times;1024&times;10
 ```
-Benchmark_Cache_Nice_Set-4            	100000000	       299 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       459 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-4            	100000000	       312 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-4   	200000000	       121 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-4      	100000000	       361 ns/op	       0 B/op	       0 allocs/op
- 
+Benchmark_Cache_Nice_Set-4            	100000000	       274 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4   	100000000	       404 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-4            	100000000	       218 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4   	300000000	       110 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4      	100000000	       351 ns/op	       0 B/op	       0 allocs/op
+
 Benchmark_Cache_Struct_Set-4                     1000000              2766 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              3243 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Get-4                     1000000              1925 ns/op             336 B/op          2 allocs/op

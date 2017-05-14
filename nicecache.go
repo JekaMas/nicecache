@@ -26,10 +26,10 @@ type Cache struct {
 	sync.RWMutex
 	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
 
-	freeIndexMutex sync.RWMutex
-	freeIndexes    map[int]struct{}
+	freeIndexMutex sync.Mutex
+	freeIndexes    []int
 	freeCount      *int32
-	freeIndexCh    chan int
+	freeIndexCh    chan struct{}
 
 	onClearing      *int32
 	startClearingCh chan struct{}
@@ -39,9 +39,9 @@ type Cache struct {
 
 // TODO: добавить логер, метрику в виде определяемых интерфейсов
 func NewNiceCache() *Cache {
-	freeIndexes := make(map[int]struct{}, cacheSize)
+	freeIndexes := make([]int, cacheSize)
 	for i := 0; i < cacheSize; i++ {
-		freeIndexes[i] = struct{}{}
+		freeIndexes[i] = i
 	}
 
 	n := int32(cacheSize)
@@ -54,7 +54,7 @@ func NewNiceCache() *Cache {
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
 		onClearing:      &onClearing,
-		freeIndexCh:     make(chan int, (cacheSize*maxFreeRatePercent)/100),
+		freeIndexCh:     make(chan struct{}, 1),
 		startClearingCh: make(chan struct{}, 1),
 		stop:            make(chan struct{}, 1), //TODO: close it when stop Cache
 	}
@@ -157,17 +157,11 @@ func (c *Cache) popFreeIndex() int {
 
 	var idx int
 	if atomic.LoadInt32(c.freeCount) == 0 {
-		idx = <-c.freeIndexCh
-	} else {
-		c.freeIndexMutex.RLock()
-		for idx = range c.freeIndexes {
-			break
-		}
-		c.freeIndexMutex.RUnlock()
+		<-c.freeIndexCh
 	}
 
 	c.freeIndexMutex.Lock()
-	delete(c.freeIndexes, idx)
+	c.freeIndexes, idx = c.freeIndexes[:len(c.freeIndexes)-1], c.freeIndexes[len(c.freeIndexes)-1]
 	c.freeIndexMutex.Unlock()
 
 	atomic.AddInt32(c.freeCount, -1)
@@ -175,30 +169,45 @@ func (c *Cache) popFreeIndex() int {
 	return idx
 }
 
-func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan int) {
+func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struct{}) {
+	// TODO tune it
+	freeIndexChunk := make([]int, 0, 100)
+
 	for {
 		select {
 		case <-startClearingCh:
 			// TODO заменить на lru?
 			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
 			i := 0
-			c.freeIndexMutex.Lock()
+
 			c.Lock()
 			for h, res := range c.index {
-				freeIndexCh <- res[valueIndex]
+				freeIndexChunk = append(freeIndexChunk, res[valueIndex])
+				if i%100 == 0 {
+					c.freeIndexMutex.Lock()
+					c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
+					c.freeIndexMutex.Unlock()
+					freeIndexChunk = freeIndexChunk[:0]
+				}
 
-				c.freeIndexes[res[valueIndex]] = struct{}{}
 				delete(c.index, h)
 				c.c[res[valueIndex]] = nil
+
+				if i == 0 {
+					freeIndexCh <- struct{}{}
+				}
 
 				i++
 				if i >= freeBatchSize {
 					break
 				}
 			}
-
 			c.Unlock()
+
+			c.freeIndexMutex.Lock()
+			c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
 			c.freeIndexMutex.Unlock()
+			freeIndexChunk = freeIndexChunk[:0]
 
 			atomic.StoreInt32(c.freeCount, int32(i))
 
@@ -222,7 +231,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan int) 
 
 func (c *Cache) pushFreeIndex(key int) {
 	c.freeIndexMutex.Lock()
-	c.freeIndexes[key] = struct{}{}
+	c.freeIndexes = append(c.freeIndexes, key)
 	c.freeIndexMutex.Unlock()
 
 	atomic.AddInt32(c.freeCount, 1)
@@ -233,10 +242,9 @@ func (c *Cache) Flush() {
 
 	c.freeIndexMutex.Lock()
 	for i := 0; i < cacheSize; i++ {
-		c.freeIndexes[i] = struct{}{}
+		c.freeIndexes[i] = i
 	}
 	c.freeIndexMutex.Unlock()
-
 	atomic.StoreInt32(c.freeCount, cacheSize)
 
 	c.index = make(map[uint64][2]int, cacheSize)
@@ -245,4 +253,8 @@ func (c *Cache) Flush() {
 
 func (c *Cache) Len() int {
 	return cacheSize - int(atomic.LoadInt32(c.freeCount))
+}
+
+func (c *Cache) Close() {
+	close(c.stop)
 }
