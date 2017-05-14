@@ -56,7 +56,7 @@ func NewNiceCache() *Cache {
 		onClearing:      &onClearing,
 		freeIndexCh:     make(chan struct{}, 1),
 		startClearingCh: make(chan struct{}, 1),
-		stop:            make(chan struct{}, 1), //TODO: close it when stop Cache
+		stop:            make(chan struct{}),
 	}
 
 	go c.clearCache(c.startClearingCh, c.freeIndexCh)
