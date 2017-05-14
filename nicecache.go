@@ -18,6 +18,7 @@ const (
 
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 
+// TODO: подумать о быстрой сериализации и десериализации в случае если размер объекта*размер кэша больше некоего значения, или если выставлен флаг
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
 	c [cacheSize]*TestValue // Preallocated storage
@@ -118,6 +119,8 @@ func (c *Cache) Delete(key []byte) {
 	delete(c.index, h)
 	c.Unlock()
 
+	c.c[res[valueIndex]] = nil
+
 	if !ok {
 		return
 	}
@@ -133,6 +136,8 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 	c.Lock()
 	delete(c.index, h)
 	c.Unlock()
+
+	c.c[res[valueIndex]] = nil
 
 	if !ok {
 		return
@@ -181,8 +186,10 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan int) 
 			c.Lock()
 			for h, res := range c.index {
 				freeIndexCh <- res[valueIndex]
+
 				c.freeIndexes[res[valueIndex]] = struct{}{}
 				delete(c.index, h)
+				c.c[res[valueIndex]] = nil
 
 				i++
 				if i >= freeBatchSize {
@@ -228,8 +235,9 @@ func (c *Cache) Flush() {
 	for i := 0; i < cacheSize; i++ {
 		c.freeIndexes[i] = struct{}{}
 	}
-	atomic.StoreInt32(c.freeCount, cacheSize)
 	c.freeIndexMutex.Unlock()
+
+	atomic.StoreInt32(c.freeCount, cacheSize)
 
 	c.index = make(map[uint64][2]int, cacheSize)
 	c.Unlock()
