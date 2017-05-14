@@ -26,9 +26,8 @@ type Cache struct {
 	sync.RWMutex
 	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
 
-	freeIndexMutex sync.Mutex
 	freeIndexes    []int
-	freeCount      *int32
+	freeCount      *int32 // Used to store last stored index in freeIndexes (len analog)
 	freeIndexCh    chan struct{}
 
 	onClearing      *int32
@@ -160,21 +159,14 @@ func (c *Cache) popFreeIndex() int {
 		<-c.freeIndexCh
 	}
 
-	c.freeIndexMutex.Lock()
-	c.freeIndexes, idx = c.freeIndexes[:len(c.freeIndexes)-1], c.freeIndexes[len(c.freeIndexes)-1]
-	c.freeIndexMutex.Unlock()
-
-	atomic.AddInt32(c.freeCount, -1)
+	freeIdx := atomic.AddInt32(c.freeCount, int32(-1))-1 //Idx == count-1
+	idx = c.freeIndexes[int(freeIdx)+1]
 
 	return idx
 }
 
-// TODO tune it
-const updateFreeIndexesChinkSize = 50
-
 func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struct{}) {
-	freeIndexChunk := make([]int, 0, updateFreeIndexesChinkSize)
-
+	var freeIdx int32
 	for {
 		select {
 		case <-startClearingCh:
@@ -184,13 +176,8 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 
 			c.Lock()
 			for h, res := range c.index {
-				freeIndexChunk = append(freeIndexChunk, res[valueIndex])
-				if i%updateFreeIndexesChinkSize == 0 {
-					c.freeIndexMutex.Lock()
-					c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
-					c.freeIndexMutex.Unlock()
-					freeIndexChunk = freeIndexChunk[:0]
-				}
+				freeIdx = atomic.AddInt32(c.freeCount, int32(1))-1
+				c.freeIndexes[int(freeIdx)] = res[valueIndex]
 
 				delete(c.index, h)
 				c.c[res[valueIndex]] = nil
@@ -205,16 +192,6 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 				}
 			}
 			c.Unlock()
-
-			// если что-то осталось для обновления свободных индексов, то добираем
-			if len(freeIndexChunk) > 0 {
-				c.freeIndexMutex.Lock()
-				c.freeIndexes = append(c.freeIndexes, freeIndexChunk...)
-				c.freeIndexMutex.Unlock()
-				freeIndexChunk = freeIndexChunk[:0]
-			}
-
-			atomic.StoreInt32(c.freeCount, int32(i))
 
 			// Increase freeBatchSize progressive
 			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
@@ -235,21 +212,15 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 }
 
 func (c *Cache) pushFreeIndex(key int) {
-	c.freeIndexMutex.Lock()
-	c.freeIndexes = append(c.freeIndexes, key)
-	c.freeIndexMutex.Unlock()
-
-	atomic.AddInt32(c.freeCount, 1)
+	freeIdx := atomic.AddInt32(c.freeCount, int32(1))-1
+	c.freeIndexes[int(freeIdx)] = key
 }
 
 func (c *Cache) Flush() {
 	c.Lock()
-
-	c.freeIndexMutex.Lock()
 	for i := 0; i < cacheSize; i++ {
 		c.freeIndexes[i] = i
 	}
-	c.freeIndexMutex.Unlock()
 	atomic.StoreInt32(c.freeCount, cacheSize)
 
 	c.index = make(map[uint64][2]int, cacheSize)
