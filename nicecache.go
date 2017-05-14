@@ -63,7 +63,6 @@ func NewNiceCache() *Cache {
 	return c
 }
 
-// TODO отпрофилировать под нагрузкой - отдельно исследовать на блокировки
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	h := getHash(key)
 	c.RLock()
@@ -145,7 +144,6 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 	c.pushFreeIndex(res[valueIndex])
 }
 
-// FIXME Check locks distribution
 func (c *Cache) popFreeIndex() int {
 	// Если индексы иссякли, то считаем свободными процент от записей.
 	if atomic.LoadInt32(c.freeCount) == 0 {
