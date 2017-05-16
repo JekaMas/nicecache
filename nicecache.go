@@ -19,6 +19,12 @@ const (
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 var deletedValue = storedValue{TestValue{}, deletedValueFlag}
 
+func init() {
+	if freeBatchSize < 1 {
+		freeBatchSize = 1
+	}
+}
+
 type storedValue struct {
 	v           TestValue
 	expiredTime int
@@ -27,7 +33,7 @@ type storedValue struct {
 // TODO: подумать о быстрой сериализации и десериализации в случае если размер объекта*размер кэша больше некоего значения, или если выставлен флаг
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
-	storage      [cacheSize]storedValue  // Preallocated storage
+	storage      [cacheSize]storedValue   // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex //row level locks
 
 	sync.RWMutex
@@ -40,6 +46,7 @@ type Cache struct {
 
 	onClearing      *int32
 	startClearingCh chan struct{}
+	endClearingCh   chan struct{}
 
 	stop chan struct{}
 }
@@ -63,13 +70,14 @@ func NewNiceCache() *Cache {
 	onClearing := int32(0)
 	c := &Cache{
 		storage:         [cacheSize]storedValue{},
-		storageLocks: storageLocks,
+		storageLocks:    storageLocks,
 		index:           make(map[uint64]int, cacheSize),
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
 		onClearing:      &onClearing,
 		freeIndexCh:     make(chan struct{}, freeBatchSize),
 		startClearingCh: make(chan struct{}, 1),
+		endClearingCh:   make(chan struct{}),
 		stop:            make(chan struct{}),
 	}
 
@@ -173,29 +181,28 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 }
 
 func (c *Cache) popFreeIndex() int {
-	freeIdx := c.removeFreeIndex()
-	if freeIdx < 0 {
-		if atomic.CompareAndSwapInt32(c.onClearing, 0, 1) {
-			// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
-			c.freeIndexesLock.Lock()
-			c.startClearingCh <- struct{}{}
-			// Mutex dance: c.freeIndexesLock.Unlock() - will be executed in GC!
-		}
-	} else {
-		return c.freeIndexes[freeIdx]
+	freeIdx := int(-1)
+	for c.removeFreeIndex(&freeIdx) < 0 {
+		endClearingCh := c.forceClearCache()
+		<-endClearingCh
 	}
 
-	c.freeIndexesLock.RLock()
-	freeIdx = c.removeFreeIndex()
 	if freeIdx > len(c.freeIndexes)-1 || freeIdx < 0 {
-		c.freeIndexesLock.RUnlock()
-
-		// TODO need recursion control
-		return c.popFreeIndex()
+		panic(freeIdx)
 	}
-	c.freeIndexesLock.RUnlock()
 
 	return c.freeIndexes[freeIdx]
+}
+
+func (c *Cache) forceClearCache() chan struct{} {
+	if atomic.CompareAndSwapInt32(c.onClearing, 0, 1) {
+		// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
+		c.endClearingCh = make(chan struct{})
+		c.startClearingCh <- struct{}{}
+		// Mutex dance: c.freeIndexesLock.Unlock() - will be executed in GC!
+	}
+	return c.endClearingCh
+
 }
 
 func (c *Cache) clearCache(startClearingCh chan struct{}) {
@@ -263,9 +270,12 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
 				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
 			}
+			if freeBatchSize < 1 {
+				freeBatchSize = 1
+			}
 
 			atomic.StoreInt32(c.onClearing, 0)
-			c.freeIndexesLock.Unlock()
+			close(c.endClearingCh)
 		case nowTime = <-gcTicker.C:
 			now = int(nowTime.Unix())
 
@@ -326,18 +336,18 @@ func (c *Cache) addFreeIndex() int {
 }
 
 // decrease freeIndexCount and returns new last free index
-func (c *Cache) removeFreeIndex() int {
-	return int(atomic.AddInt32(c.freeCount, int32(-1))) - 1 //Idx == new freeCount - 1 == old freeCount - 2
+func (c *Cache) removeFreeIndex(idx *int) int {
+	*idx = int(atomic.AddInt32(c.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
+	if *idx < 0 {
+		atomic.AddInt32(c.freeCount, int32(1))
+		return -1
+	}
+	return *idx
 }
 
 // increase freeIndexCount by N and returns new last free index
 func (c *Cache) addNFreeIndex(n int) int {
 	return int(atomic.AddInt32(c.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
-}
-
-// decrease freeIndexCount by N and returns new last free index
-func (c *Cache) removeNFreeIndex(n int) int {
-	return int(atomic.AddInt32(c.freeCount, int32(-n))) - 1 //Idx == new freeCount - 1 == old freeCount - 2
 }
 
 func (c *Cache) Flush() {
