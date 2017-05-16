@@ -30,8 +30,6 @@ type storedValue struct {
 	expiredTime int
 }
 
-// TODO: подумать о быстрой сериализации и десериализации в случае если размер объекта*размер кэша больше некоего значения, или если выставлен флаг
-// TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
 	storage      [cacheSize]storedValue   // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex //row level locks

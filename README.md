@@ -1,10 +1,10 @@
 размер кэша 1024&times;1024
 ```
-Benchmark_Cache_Nice_Set-4            	30000000	       246 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       133 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-4            	30000000	       276 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       136 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-4      	20000000	       354 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set-4            	30000000	       239 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       151 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-4            	30000000	       261 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       125 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4      	20000000	       337 ns/op	       0 B/op	       0 allocs/op
      
 Benchmark_Cache_Struct_Set-4                     2000000               894 ns/op             219 B/op          1 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              1151 ns/op             247 B/op          1 allocs/op
@@ -15,11 +15,11 @@ Benchmark_Cache_Struct_SetAndGet-4               1000000              3247 ns/op
 
 размер кэша 1024&times;1024&times;10
 ```
-Benchmark_Cache_Nice_Set-4            	20000000	       336 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       167 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-4            	20000000	       349 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       167 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-4      	20000000	       468 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set-4            	30000000	       291 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       147 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-4            	20000000	       310 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       156 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4      	20000000	       380 ns/op	       0 B/op	       0 allocs/op
     
 Benchmark_Cache_Struct_Set-4                     1000000              2766 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              3243 ns/op             761 B/op          5 allocs/op
@@ -30,11 +30,11 @@ Benchmark_Cache_Struct_SetAndGet-4                300000              5638 ns/op
 
 размер кэша 1024&times;1024&times;10 - 16cpu
 ```
-Benchmark_Cache_Nice_Set-16             	20000000	       334 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-16    	30000000	       177 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-16             	20000000	       341 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-16    	50000000	       160 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-16       	20000000	       478 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set-16             	20000000	       307 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-16    	50000000	       142 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-16             	20000000	       322 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-16    	50000000	       150 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-16       	20000000	       410 ns/op	       0 B/op	       0 allocs/op
  
 Benchmark_Cache_Struct_Set-16                    1000000              4124 ns/op             793 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-16            300000              4828 ns/op             774 B/op          5 allocs/op
