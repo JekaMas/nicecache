@@ -1,10 +1,10 @@
 размер кэша 1024&times;1024
 ```
-Benchmark_Cache_Nice_Set-4            	200000000	       175 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-4   	100000000	       337 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-4            	200000000	       128 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-4   	500000000	        70.1 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-4      	100000000	       276 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set-4            	30000000	       246 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       133 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-4            	30000000	       276 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       136 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4      	20000000	       354 ns/op	       0 B/op	       0 allocs/op
      
 Benchmark_Cache_Struct_Set-4                     2000000               894 ns/op             219 B/op          1 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              1151 ns/op             247 B/op          1 allocs/op
@@ -15,12 +15,12 @@ Benchmark_Cache_Struct_SetAndGet-4               1000000              3247 ns/op
 
 размер кэша 1024&times;1024&times;10
 ```
-Benchmark_Cache_Nice_Set-4            	100000000	       259 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-4   	100000000	       399 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-4            	100000000	       218 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-4   	300000000	       110 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-4      	100000000	       351 ns/op	       0 B/op	       0 allocs/op
-
+Benchmark_Cache_Nice_Set-4            	20000000	       336 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-4   	50000000	       167 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-4            	20000000	       349 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-4   	50000000	       167 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-4      	20000000	       468 ns/op	       0 B/op	       0 allocs/op
+    
 Benchmark_Cache_Struct_Set-4                     1000000              2766 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-4            1000000              3243 ns/op             761 B/op          5 allocs/op
 Benchmark_Cache_Struct_Get-4                     1000000              1925 ns/op             336 B/op          2 allocs/op
@@ -30,11 +30,11 @@ Benchmark_Cache_Struct_SetAndGet-4                300000              5638 ns/op
 
 размер кэша 1024&times;1024&times;10 - 16cpu
 ```
-Benchmark_Cache_Nice_Set-16             	100000000	       275 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Set_Parallel-16    	100000000	       408 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get-16             	100000000	       257 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_Get_Parallel-16    	300000000	       106 ns/op	       0 B/op	       0 allocs/op
-Benchmark_Cache_Nice_SetAndGet-16       	100000000	       355 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set-16             	20000000	       334 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Set_Parallel-16    	30000000	       177 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get-16             	20000000	       341 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_Get_Parallel-16    	50000000	       160 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Cache_Nice_SetAndGet-16       	20000000	       478 ns/op	       0 B/op	       0 allocs/op
  
 Benchmark_Cache_Struct_Set-16                    1000000              4124 ns/op             793 B/op          5 allocs/op
 Benchmark_Cache_Struct_Set_Parallel-16            300000              4828 ns/op             774 B/op          5 allocs/op

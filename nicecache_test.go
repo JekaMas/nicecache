@@ -17,17 +17,16 @@ func Benchmark_Cache_Nice_Set(b *testing.B) {
 	defer cache.Close()
 
 	keys := make([][]byte, repeats)
-	values := make([]*TestValue, repeats)
 	for i := 0; i < repeats; i++ {
 		keys[i] = []byte(strconv.Itoa(i))
-		values[i] = getTestValue()
 	}
+	toStore := getTestValue()
 
 	var err error
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		e := cache.Set(keys[i%repeats], values[i%repeats], 180)
+		e := cache.Set(keys[i%repeats], &toStore, 180)
 		if e != nil {
 			err = e
 		}
@@ -44,11 +43,10 @@ func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 	defer cache.Close()
 
 	keys := make([][]byte, repeats)
-	values := make([]*TestValue, repeats)
 	for i := 0; i < repeats; i++ {
 		keys[i] = []byte(strconv.Itoa(i))
-		values[i] = getTestValue()
 	}
+	toStore := getTestValue()
 
 	var i int32 = 0
 	var err error
@@ -57,7 +55,7 @@ func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			i := atomic.AddInt32(&i, 1)
-			e := cache.Set(keys[int(i)%repeats], values[int(i)%repeats], 180)
+			e := cache.Set(keys[int(i)%repeats], &toStore, 180)
 			if e != nil {
 				err = e
 			}
@@ -75,27 +73,26 @@ func Benchmark_Cache_Nice_Get(b *testing.B) {
 	defer cache.Close()
 
 	keys := make([][]byte, repeats)
-	values := make([]*TestValue, repeats)
 	for i := 0; i < repeats; i++ {
 		keys[i] = []byte(strconv.Itoa(i))
-		values[i] = getTestValue()
 	}
+	toStore := getTestValue()
 
 	for i := 0; i < repeats; i++ {
-		err := cache.Set(keys[i], values[i], 180)
+		err := cache.Set(keys[i], &toStore, 180)
 		if err != nil {
 			fmt.Fprint(ioutil.Discard, "ERROR!!! SET: ", err)
 		}
 	}
 
 	var (
-		res *TestValue
+		res TestValue
 		err error
 	)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		res, err = cache.Get(keys[i%repeats])
+		err = cache.Get(keys[i%repeats], &res)
 		if err != nil {
 			fmt.Fprint(ioutil.Discard, "ERROR!!! GET ", err)
 		}
@@ -110,14 +107,13 @@ func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 	defer cache.Close()
 
 	keys := make([][]byte, repeats)
-	values := make([]*TestValue, repeats)
 	for i := 0; i < repeats; i++ {
 		keys[i] = []byte(strconv.Itoa(i))
-		values[i] = getTestValue()
 	}
+	toStore := getTestValue()
 
 	for i := 0; i < repeats; i++ {
-		err := cache.Set(keys[i], values[i], 180)
+		err := cache.Set(keys[i], &toStore, 180)
 		if err != nil {
 			fmt.Fprint(ioutil.Discard, "ERROR!!! SET ", err)
 		}
@@ -125,12 +121,13 @@ func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 
 	var i int32 = 0
 	var err error
+	var res TestValue
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			i := atomic.AddInt32(&i, 1)
-			_, e := cache.Get(keys[int(i)%repeats])
+			e := cache.Get(keys[int(i)%repeats], &res)
 			if e != nil {
 				err = e
 			}
@@ -148,27 +145,26 @@ func Benchmark_Cache_Nice_SetAndGet(b *testing.B) {
 	defer cache.Close()
 
 	keys := make([][]byte, repeats)
-	values := make([]*TestValue, repeats)
 	for i := 0; i < repeats; i++ {
 		keys[i] = []byte(strconv.Itoa(i))
-		values[i] = getTestValue()
 	}
-	cache.Set(keys[0], values[0], 180)
+	toStore := getTestValue()
+	cache.Set(keys[0], &toStore, 180)
 
-	var res *TestValue
+	var res TestValue
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Set(keys[(i+1)%repeats], values[(i+1)%repeats], 180)
-		res, _ = cache.Get(keys[i%repeats])
+		cache.Set(keys[(i+1)%repeats], &toStore, 180)
+		cache.Get(keys[i%repeats], &res)
 	}
 	b.StopTimer()
 
 	fmt.Fprint(ioutil.Discard, res.ID)
 }
 
-func getTestValue() *TestValue {
-	return &testValue
+func getTestValue() TestValue {
+	return testValue
 }
 
 var t = true

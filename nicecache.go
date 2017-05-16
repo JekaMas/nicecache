@@ -7,28 +7,36 @@ import (
 )
 
 const (
-	cacheSize        = 1024 * 1024 * 10
-	freeBatchPercent = 1
-	expiredIndex     = 0
-	valueIndex       = 1
+	cacheSize = 1024 * 1024 * 10
 
+	freeBatchPercent   = 1
 	alpha              = 1 // Percent increasing speed of freeBatchSize
 	maxFreeRatePercent = 33
+
+	deletedValueFlag = 0
 )
 
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
+var deletedValue = storedValue{TestValue{}, deletedValueFlag}
+
+type storedValue struct {
+	v           TestValue
+	expiredTime int
+}
 
 // TODO: подумать о быстрой сериализации и десериализации в случае если размер объекта*размер кэша больше некоего значения, или если выставлен флаг
 // TODO: надо обеспечить в генераторе выбор для структур или ссылок на структуры (или и то и то) генерируется кэш
 type Cache struct {
-	c [cacheSize]*TestValue // Preallocated storage
+	storage      [cacheSize]storedValue  // Preallocated storage
+	storageLocks [cacheSize]*sync.RWMutex //row level locks
 
 	sync.RWMutex
-	index map[uint64][2]int // map[hashedKey][expiredTime, valueIndexInArray]
+	index map[uint64]int // map[hashedKey]valueIndexInArray
 
-	freeIndexes    []int
-	freeCount      *int32 // Used to store last stored index in freeIndexes (len analog)
-	freeIndexCh    chan struct{}
+	freeIndexesLock sync.RWMutex
+	freeIndexes     []int
+	freeCount       *int32 // Used to store last stored index in freeIndexes (len analog)
+	freeIndexCh     chan struct{}
 
 	onClearing      *int32
 	startClearingCh chan struct{}
@@ -43,22 +51,29 @@ func NewNiceCache() *Cache {
 		freeIndexes[i] = i
 	}
 
-	n := int32(cacheSize)
+	storageLocks := [cacheSize]*sync.RWMutex{}
+	for i := 0; i < cacheSize; i++ {
+		lock := sync.RWMutex{}
+		storageLocks[i] = &lock
+	}
+
+	n := int32(len(freeIndexes))
 	freeCount := &n
 
 	onClearing := int32(0)
 	c := &Cache{
-		c:               [cacheSize]*TestValue{},
-		index:           make(map[uint64][2]int, cacheSize),
+		storage:         [cacheSize]storedValue{},
+		storageLocks: storageLocks,
+		index:           make(map[uint64]int, cacheSize),
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
 		onClearing:      &onClearing,
-		freeIndexCh:     make(chan struct{}, 1),
+		freeIndexCh:     make(chan struct{}, freeBatchSize),
 		startClearingCh: make(chan struct{}, 1),
 		stop:            make(chan struct{}),
 	}
 
-	go c.clearCache(c.startClearingCh, c.freeIndexCh)
+	go c.clearCache(c.startClearingCh)
 
 	return c
 }
@@ -66,123 +81,170 @@ func NewNiceCache() *Cache {
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	h := getHash(key)
 	c.RLock()
-	res, ok := c.index[h]
+	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
-	var freeIdx int
-	now := int(time.Now().Unix())
-
 	if !ok {
-		freeIdx = c.popFreeIndex()
-	} else {
-		freeIdx = res[valueIndex]
+		valueIdx = c.popFreeIndex()
+
+		c.Lock()
+		c.index[h] = valueIdx
+		c.Unlock()
 	}
 
-	c.Lock()
-	c.index[h] = [2]int{now + expireSeconds, freeIdx}
-	c.Unlock()
+	rowLock := c.storageLocks[valueIdx]
+	rowLock.Lock()
+	c.storage[valueIdx].v = *value
+	c.storage[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
+	rowLock.Unlock()
 
-	c.c[freeIdx] = value
 	return nil
 }
 
-func (c *Cache) Get(key []byte) (*TestValue, error) {
+func (c *Cache) Get(key []byte, value *TestValue) error {
 	h := getHash(key)
 	c.RLock()
-	res, ok := c.index[h]
+	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
 	if !ok {
-		return nil, NotFoundError
+		return NotFoundError
 	}
 
-	now := int(time.Now().Unix())
-	valueIdx := res[valueIndex]
+	if value == nil {
+		return NilValueError
+	}
 
-	if (res[expiredIndex] - now) <= 0 {
+	rowLock := c.storageLocks[valueIdx]
+	rowLock.RLock()
+	result := c.storage[valueIdx]
+	rowLock.RUnlock()
+
+	if (result.expiredTime - int(time.Now().Unix())) <= 0 {
 		c.delete(h, valueIdx)
-		return nil, NotFoundError
+		return NotFoundError
 	}
 
-	return c.c[valueIdx], nil
+	*value = result.v
+	return nil
 }
 
 func (c *Cache) Delete(key []byte) {
 	h := getHash(key)
 	c.RLock()
-	res, ok := c.index[h]
+	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
 	c.Lock()
 	delete(c.index, h)
 	c.Unlock()
 
-	c.c[res[valueIndex]] = nil
+	rowLock := c.storageLocks[valueIdx]
+	rowLock.Lock()
+	//c.storage[valueIdx] = deletedValue
+	c.storage[valueIdx].expiredTime = deletedValueFlag
+	rowLock.Unlock()
 
 	if !ok {
 		return
 	}
 
-	c.pushFreeIndex(res[valueIndex])
+	c.pushFreeIndex(valueIdx)
 }
 
 func (c *Cache) delete(h uint64, valueIdx int) {
 	c.RLock()
-	res, ok := c.index[h]
+	valueIdx, ok := c.index[h]
 	c.RUnlock()
+	if !ok {
+		return
+	}
 
 	c.Lock()
 	delete(c.index, h)
 	c.Unlock()
 
-	c.c[res[valueIndex]] = nil
+	rowLock := c.storageLocks[valueIdx]
+	rowLock.Lock()
+	c.storage[valueIdx] = deletedValue
+	rowLock.Unlock()
 
-	if !ok {
-		return
-	}
-
-	c.pushFreeIndex(res[valueIndex])
+	c.pushFreeIndex(valueIdx)
 }
 
 func (c *Cache) popFreeIndex() int {
-	// Если индексы иссякли, то считаем свободными процент от записей.
-	if atomic.LoadInt32(c.freeCount) == 0 {
+	freeIdx := c.removeFreeIndex()
+	if freeIdx < 0 {
 		if atomic.CompareAndSwapInt32(c.onClearing, 0, 1) {
+			// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
+			c.freeIndexesLock.Lock()
 			c.startClearingCh <- struct{}{}
+			// Mutex dance: c.freeIndexesLock.Unlock() - will be executed in GC!
 		}
+	} else {
+		return c.freeIndexes[freeIdx]
 	}
 
-	var idx int
-	if atomic.LoadInt32(c.freeCount) == 0 {
-		<-c.freeIndexCh
+	c.freeIndexesLock.RLock()
+	freeIdx = c.removeFreeIndex()
+	if freeIdx > len(c.freeIndexes)-1 || freeIdx < 0 {
+		c.freeIndexesLock.RUnlock()
+
+		// TODO need recursion control
+		return c.popFreeIndex()
 	}
+	c.freeIndexesLock.RUnlock()
 
-	freeIdx := atomic.AddInt32(c.freeCount, int32(-1))-1 //Idx == count-1
-	idx = c.freeIndexes[int(freeIdx)+1]
-
-	return idx
+	return c.freeIndexes[freeIdx]
 }
 
-func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struct{}) {
-	var freeIdx int32
+func (c *Cache) clearCache(startClearingCh chan struct{}) {
+	var (
+		freeIdx int
+
+		nowTime time.Time
+		now     int
+		cyrcle  int
+
+		gcTicker = time.NewTicker(1 * time.Hour)
+
+		clearChunkSize      = cacheSize / 100 // 1% over cache size
+		currentChunk        int
+		currentChunkIndexes [2]int
+		indexInCacheArray   int
+
+		iterateStoredValue storedValue
+
+		freeIndexes = []int{}
+		maxFreeIdx  int
+
+		rowLock *sync.RWMutex
+	)
+
+	chunks, _ := chunks(cacheSize, clearChunkSize)
+
 	for {
 		select {
 		case <-startClearingCh:
 			// TODO заменить на lru?
-			// TODO: подумать, что делать с истекшим ttl - надо высвобождать хотя бы частично эти записи. возможно с лимитом времени на gc
 			i := 0
 
 			c.Lock()
-			for h, res := range c.index {
-				freeIdx = atomic.AddInt32(c.freeCount, int32(1))-1
-				c.freeIndexes[int(freeIdx)] = res[valueIndex]
-
+			for h, valueIdx := range c.index {
 				delete(c.index, h)
-				c.c[res[valueIndex]] = nil
 
-				if i == 0 {
-					freeIndexCh <- struct{}{}
+				rowLock = c.storageLocks[valueIdx]
+				rowLock.Lock()
+				if c.storage[valueIdx].expiredTime == deletedValueFlag {
+					// trying to delete deleted element in map
+					rowLock.Unlock()
+					continue
 				}
+				c.storage[valueIdx] = deletedValue
+				rowLock.Unlock()
+
+				freeIdx = c.addFreeIndex()
+				c.freeIndexes[freeIdx] = valueIdx
 
 				i++
 				if i >= freeBatchSize {
@@ -203,15 +265,79 @@ func (c *Cache) clearCache(startClearingCh chan struct{}, freeIndexCh chan struc
 			}
 
 			atomic.StoreInt32(c.onClearing, 0)
+			c.freeIndexesLock.Unlock()
+		case nowTime = <-gcTicker.C:
+			now = int(nowTime.Unix())
+
+			currentChunk = cyrcle % len(chunks)
+			currentChunkIndexes = chunks[currentChunk]
+
+			for idx := range c.storage[currentChunkIndexes[0]:currentChunkIndexes[1]] {
+				indexInCacheArray = idx + currentChunkIndexes[0]
+
+				rowLock = c.storageLocks[indexInCacheArray]
+				rowLock.RLock()
+				iterateStoredValue = c.storage[indexInCacheArray]
+				rowLock.RUnlock()
+
+				if iterateStoredValue.expiredTime == deletedValueFlag {
+					continue
+				}
+
+				if (iterateStoredValue.expiredTime - now) <= 0 {
+					rowLock.Lock()
+					c.storage[indexInCacheArray] = deletedValue
+					rowLock.Unlock()
+
+					freeIndexes = append(freeIndexes, indexInCacheArray)
+				}
+			}
+
+			if len(freeIndexes) > 0 {
+				maxFreeIdx = c.addNFreeIndex(len(freeIndexes))
+				for _, indexInCacheArray := range freeIndexes {
+					c.freeIndexes[maxFreeIdx] = indexInCacheArray
+					maxFreeIdx--
+				}
+
+				// try to reuse freeIndexes slice
+				if cap(freeIndexes) > 10000 {
+					freeIndexes = []int{}
+				}
+				freeIndexes = freeIndexes[:0]
+			}
+
+			cyrcle++
 		case <-c.stop:
+			gcTicker.Stop()
 			return
 		}
 	}
 }
 
 func (c *Cache) pushFreeIndex(key int) {
-	freeIdx := atomic.AddInt32(c.freeCount, int32(1))-1
-	c.freeIndexes[int(freeIdx)] = key
+	freeIdx := c.addFreeIndex()
+	c.freeIndexes[freeIdx] = key
+}
+
+// increase freeIndexCount and returns new last free index
+func (c *Cache) addFreeIndex() int {
+	return int(atomic.AddInt32(c.freeCount, int32(1))) - 1 //Idx == new freeCount - 1 == old freeCount
+}
+
+// decrease freeIndexCount and returns new last free index
+func (c *Cache) removeFreeIndex() int {
+	return int(atomic.AddInt32(c.freeCount, int32(-1))) - 1 //Idx == new freeCount - 1 == old freeCount - 2
+}
+
+// increase freeIndexCount by N and returns new last free index
+func (c *Cache) addNFreeIndex(n int) int {
+	return int(atomic.AddInt32(c.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
+}
+
+// decrease freeIndexCount by N and returns new last free index
+func (c *Cache) removeNFreeIndex(n int) int {
+	return int(atomic.AddInt32(c.freeCount, int32(-n))) - 1 //Idx == new freeCount - 1 == old freeCount - 2
 }
 
 func (c *Cache) Flush() {
@@ -221,7 +347,7 @@ func (c *Cache) Flush() {
 	}
 	atomic.StoreInt32(c.freeCount, cacheSize)
 
-	c.index = make(map[uint64][2]int, cacheSize)
+	c.index = make(map[uint64]int, cacheSize)
 	c.Unlock()
 }
 
