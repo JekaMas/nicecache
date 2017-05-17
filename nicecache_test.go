@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-var repeats = &freeBatchSize
+var testsize = (cacheSize * 50) / 100
+var repeats = &testsize
 
 // TODO сделать тесты при кэше прогретом на 10, 30, 50, 100%
 

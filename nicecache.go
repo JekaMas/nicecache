@@ -32,7 +32,8 @@ type storedValue struct {
 
 type Cache struct {
 	storage      [cacheSize]storedValue   // Preallocated storage
-	storageLocks [cacheSize]*sync.RWMutex //row level locks
+	storageLocks [cacheSize]*sync.RWMutex // row level locks
+	frequency    lru
 
 	sync.RWMutex
 	index map[uint64]int // map[hashedKey]valueIndexInArray
@@ -197,7 +198,6 @@ func (c *Cache) forceClearCache() chan struct{} {
 		// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
 		c.endClearingCh = make(chan struct{})
 		c.startClearingCh <- struct{}{}
-		// Mutex dance: c.freeIndexesLock.Unlock() - will be executed in GC!
 	}
 	return c.endClearingCh
 
@@ -232,6 +232,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 		select {
 		case <-startClearingCh:
 			// TODO заменить на lru?
+			// Мне не нужно хранить весь список элементов с их частотой использования для lru. мне достаточно хранить НЕ БОЛЕЕ количества, которое будет очищено, то есть от freeBatchPercent до (cacheSize*maxFreeRatePercent)/100, но не менее 1. Мне не нужен большой двусвязный список, возможно удастся обойтись обычным отсортированным списком
 			i := 0
 
 			c.Lock()
