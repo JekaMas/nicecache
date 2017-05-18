@@ -17,7 +17,7 @@ const (
 )
 
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
-var deletedValue = storedValue{TestValue{}, deletedValueFlag}
+var deletedValue = storedValue{TestValue{}, deletedValueFlag, deletedValueFlag, deletedValueFlag}
 
 func init() {
 	if freeBatchSize < 1 {
@@ -27,13 +27,15 @@ func init() {
 
 type storedValue struct {
 	v           TestValue
+	bucketIdx   int
+	hashedKey   uint64
 	expiredTime int
 }
 
 type Cache struct {
 	storage      [cacheSize]storedValue   // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex // row level locks
-	frequency    lru
+	frequency    *LRU
 
 	sync.RWMutex
 	index map[uint64]int // map[hashedKey]valueIndexInArray
@@ -70,6 +72,7 @@ func NewNiceCache() *Cache {
 	c := &Cache{
 		storage:         [cacheSize]storedValue{},
 		storageLocks:    storageLocks,
+		frequency:       NewLru(cacheSize),
 		index:           make(map[uint64]int, cacheSize),
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
@@ -91,17 +94,26 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
+	var isNewBucket bool
 	if !ok {
 		valueIdx = c.popFreeIndex()
 
 		c.Lock()
 		c.index[h] = valueIdx
 		c.Unlock()
+
+		isNewBucket = true
 	}
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
 	c.storage[valueIdx].v = *value
+
+	if isNewBucket {
+		c.storage[valueIdx].bucketIdx = c.frequency.Add(valueIdx)
+	}
+
+	c.storage[valueIdx].hashedKey = h
 	c.storage[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
 	rowLock.Unlock()
 
@@ -132,6 +144,8 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 		return NotFoundError
 	}
 
+	c.frequency.Change(valueIdx, result.bucketIdx)
+
 	*value = result.v
 	return nil
 }
@@ -142,19 +156,25 @@ func (c *Cache) Delete(key []byte) {
 	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
+	if !ok {
+		return
+	}
+
 	c.Lock()
 	delete(c.index, h)
 	c.Unlock()
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
+	bucketIdx := c.storage[valueIdx].bucketIdx
+
 	//c.storage[valueIdx] = deletedValue
+	c.storage[valueIdx].bucketIdx = deletedValueFlag
+	c.storage[valueIdx].hashedKey = deletedValueFlag
 	c.storage[valueIdx].expiredTime = deletedValueFlag
 	rowLock.Unlock()
 
-	if !ok {
-		return
-	}
+	c.frequency.Delete(valueIdx, bucketIdx)
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -173,8 +193,12 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
+	bucketIdx := c.storage[valueIdx].bucketIdx
+
 	c.storage[valueIdx] = deletedValue
 	rowLock.Unlock()
+
+	c.frequency.Delete(valueIdx, bucketIdx)
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -222,6 +246,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 		freeIndexes = []int{}
 		maxFreeIdx  int
+		hashedKey   uint64
 
 		rowLock *sync.RWMutex
 	)
@@ -231,31 +256,26 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 	for {
 		select {
 		case <-startClearingCh:
-			// TODO заменить на lru?
-			// Мне не нужно хранить весь список элементов с их частотой использования для lru. мне достаточно хранить НЕ БОЛЕЕ количества, которое будет очищено, то есть от freeBatchPercent до (cacheSize*maxFreeRatePercent)/100, но не менее 1. Мне не нужен большой двусвязный список, возможно удастся обойтись обычным отсортированным списком
-			i := 0
+			toDeleteIdxs := c.frequency.DeleteCount(freeBatchSize)
 
 			c.Lock()
-			for h, valueIdx := range c.index {
-				delete(c.index, h)
-
-				rowLock = c.storageLocks[valueIdx]
+			for _, deleteIdx := range toDeleteIdxs {
+				rowLock = c.storageLocks[deleteIdx]
 				rowLock.Lock()
-				if c.storage[valueIdx].expiredTime == deletedValueFlag {
-					// trying to delete deleted element in map
+
+				hashedKey = c.storage[deleteIdx].hashedKey
+				delete(c.index, hashedKey)
+
+				if c.storage[deleteIdx].expiredTime == deletedValueFlag {
+					// trying to Delete deleted element in map
 					rowLock.Unlock()
 					continue
 				}
-				c.storage[valueIdx] = deletedValue
+				c.storage[deleteIdx] = deletedValue
 				rowLock.Unlock()
 
 				freeIdx = c.addFreeIndex()
-				c.freeIndexes[freeIdx] = valueIdx
-
-				i++
-				if i >= freeBatchSize {
-					break
-				}
+				c.freeIndexes[freeIdx] = deleteIdx
 			}
 			c.Unlock()
 
@@ -276,6 +296,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			atomic.StoreInt32(c.onClearing, 0)
 			close(c.endClearingCh)
 		case nowTime = <-gcTicker.C:
+			// todo replace with iteration over lru cache
 			now = int(nowTime.Unix())
 
 			currentChunk = cyrcle % len(chunks)
@@ -288,6 +309,9 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 				rowLock.RLock()
 				iterateStoredValue = c.storage[indexInCacheArray]
 				rowLock.RUnlock()
+
+
+				c.frequency.Delete(indexInCacheArray, iterateStoredValue.bucketIdx)
 
 				if iterateStoredValue.expiredTime == deletedValueFlag {
 					continue
