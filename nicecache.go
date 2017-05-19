@@ -33,7 +33,6 @@ type storedValue struct {
 type Cache struct {
 	storage      [cacheSize]storedValue   // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex // row level locks
-	frequency    lru
 
 	sync.RWMutex
 	index map[uint64]int // map[hashedKey]valueIndexInArray
