@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	cacheSize = 1024 * 1024 * 10
+	cacheSize    = 1024 * 1024 * 10
+	indexBuckets = 100
 
 	freeBatchPercent   = 1
 	alpha              = 1 // Percent increasing speed of freeBatchSize
@@ -34,8 +35,8 @@ type Cache struct {
 	storage      [cacheSize]storedValue   // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex // row level locks
 
-	sync.RWMutex
-	index map[uint64]int // map[hashedKey]valueIndexInArray
+	index      [indexBuckets]map[uint64]int // map[hashedKey]valueIndexInArray
+	indexLocks [indexBuckets]*sync.RWMutex  // few maps for less locks
 
 	freeIndexesLock sync.RWMutex
 	freeIndexes     []int
@@ -47,6 +48,7 @@ type Cache struct {
 	endClearingCh   chan struct{}
 
 	stop chan struct{}
+	sync.RWMutex
 }
 
 // TODO: добавить логер, метрику в виде определяемых интерфейсов
@@ -62,6 +64,14 @@ func NewNiceCache() *Cache {
 		storageLocks[i] = &lock
 	}
 
+	index := [indexBuckets]map[uint64]int{}
+	indexLocks := [indexBuckets]*sync.RWMutex{}
+	for i := 0; i < indexBuckets; i++ {
+		lock := sync.RWMutex{}
+		index[i] = make(map[uint64]int, cacheSize/indexBuckets)
+		indexLocks[i] = &lock
+	}
+
 	n := int32(len(freeIndexes))
 	freeCount := &n
 
@@ -69,7 +79,8 @@ func NewNiceCache() *Cache {
 	c := &Cache{
 		storage:         [cacheSize]storedValue{},
 		storageLocks:    storageLocks,
-		index:           make(map[uint64]int, cacheSize),
+		index:           index,
+		indexLocks:      indexLocks,
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
 		onClearing:      &onClearing,
@@ -86,16 +97,20 @@ func NewNiceCache() *Cache {
 
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	h := getHash(key)
-	c.RLock()
-	valueIdx, ok := c.index[h]
-	c.RUnlock()
+	bucketIdx := getBucketIdx(h)
+	indexBucketLock := c.indexLocks[bucketIdx]
+	indexBucket := c.index[bucketIdx]
+
+	indexBucketLock.RLock()
+	valueIdx, ok := indexBucket[h]
+	indexBucketLock.RUnlock()
 
 	if !ok {
 		valueIdx = c.popFreeIndex()
 
-		c.Lock()
-		c.index[h] = valueIdx
-		c.Unlock()
+		indexBucketLock.Lock()
+		indexBucket[h] = valueIdx
+		indexBucketLock.Unlock()
 	}
 
 	rowLock := c.storageLocks[valueIdx]
@@ -109,9 +124,13 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 
 func (c *Cache) Get(key []byte, value *TestValue) error {
 	h := getHash(key)
-	c.RLock()
-	valueIdx, ok := c.index[h]
-	c.RUnlock()
+	bucketIdx := getBucketIdx(h)
+	indexBucketLock := c.indexLocks[bucketIdx]
+	indexBucket := c.index[bucketIdx]
+
+	indexBucketLock.RLock()
+	valueIdx, ok := indexBucket[h]
+	indexBucketLock.RUnlock()
 
 	if !ok {
 		return NotFoundError
@@ -137,13 +156,17 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 
 func (c *Cache) Delete(key []byte) {
 	h := getHash(key)
-	c.RLock()
-	valueIdx, ok := c.index[h]
-	c.RUnlock()
+	bucketIdx := getBucketIdx(h)
+	indexBucketLock := c.indexLocks[bucketIdx]
+	indexBucket := c.index[bucketIdx]
 
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
+	indexBucketLock.RLock()
+	valueIdx, ok := indexBucket[h]
+	indexBucketLock.RUnlock()
+
+	indexBucketLock.Lock()
+	delete(indexBucket, h)
+	indexBucketLock.Unlock()
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
@@ -159,16 +182,20 @@ func (c *Cache) Delete(key []byte) {
 }
 
 func (c *Cache) delete(h uint64, valueIdx int) {
-	c.RLock()
-	valueIdx, ok := c.index[h]
-	c.RUnlock()
+	bucketIdx := getBucketIdx(h)
+	indexBucketLock := c.indexLocks[bucketIdx]
+	indexBucket := c.index[bucketIdx]
+
+	indexBucketLock.RLock()
+	valueIdx, ok := indexBucket[h]
+	indexBucketLock.RUnlock()
 	if !ok {
 		return
 	}
 
-	c.Lock()
-	delete(c.index, h)
-	c.Unlock()
+	indexBucketLock.Lock()
+	delete(indexBucket, h)
+	indexBucketLock.Unlock()
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
@@ -234,29 +261,34 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			// Мне не нужно хранить весь список элементов с их частотой использования для lru. мне достаточно хранить НЕ БОЛЕЕ количества, которое будет очищено, то есть от freeBatchPercent до (cacheSize*maxFreeRatePercent)/100, но не менее 1. Мне не нужен большой двусвязный список, возможно удастся обойтись обычным отсортированным списком
 			i := 0
 
-			c.Lock()
-			for h, valueIdx := range c.index {
-				delete(c.index, h)
+			for bucketIdx, bucket := range c.index {
+				indexBucketLock := c.indexLocks[bucketIdx]
 
-				rowLock = c.storageLocks[valueIdx]
-				rowLock.Lock()
-				if c.storage[valueIdx].expiredTime == deletedValueFlag {
-					// trying to delete deleted element in map
+				indexBucketLock.Lock()
+
+				for h, valueIdx := range bucket {
+					delete(bucket, h)
+
+					rowLock = c.storageLocks[valueIdx]
+					rowLock.Lock()
+					if c.storage[valueIdx].expiredTime == deletedValueFlag {
+						// trying to delete deleted element in map
+						rowLock.Unlock()
+						continue
+					}
+					c.storage[valueIdx] = deletedValue
 					rowLock.Unlock()
-					continue
-				}
-				c.storage[valueIdx] = deletedValue
-				rowLock.Unlock()
 
-				freeIdx = c.addFreeIndex()
-				c.freeIndexes[freeIdx] = valueIdx
+					freeIdx = c.addFreeIndex()
+					c.freeIndexes[freeIdx] = valueIdx
 
-				i++
-				if i >= freeBatchSize {
-					break
+					i++
+					if i >= freeBatchSize {
+						break
+					}
 				}
+				indexBucketLock.Unlock()
 			}
-			c.Unlock()
 
 			// Increase freeBatchSize progressive
 			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
@@ -350,12 +382,20 @@ func (c *Cache) addNFreeIndex(n int) int {
 
 func (c *Cache) Flush() {
 	c.Lock()
-	for i := 0; i < cacheSize; i++ {
-		c.freeIndexes[i] = i
-	}
-	atomic.StoreInt32(c.freeCount, cacheSize)
+	for bucketIdx := range c.index {
+		indexBucketLock := c.indexLocks[bucketIdx]
 
-	c.index = make(map[uint64]int, cacheSize)
+		indexBucketLock.Lock()
+
+		for i := 0; i < cacheSize; i++ {
+			c.freeIndexes[i] = i
+		}
+		atomic.StoreInt32(c.freeCount, cacheSize)
+
+		c.index[bucketIdx] = make(map[uint64]int, cacheSize)
+
+		indexBucketLock.Unlock()
+	}
 	c.Unlock()
 }
 
