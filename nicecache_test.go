@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-var testsize = (cacheSize * 50) / 100
-var repeats = &testsize
-
 // TODO сделать тесты при кэше прогретом на 10, 30, 50, 100%
+var testsize = (cacheSize * 1) / 100
+var repeats = &testsize
 
 func Benchmark_Cache_Nice_Set(b *testing.B) {
 	cache := NewNiceCache()
