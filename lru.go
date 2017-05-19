@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	startBucket = 0
+	startCount = 0
 
 	incorrectIndex = -1
 	cacheIsEmpty   = -1
@@ -20,8 +20,6 @@ const (
 	DeleteAction = Action(2)
 )
 
-const defaultMapSize = 5000000
-
 // LRU - это слайс, где индекс - это логарифм от количества вызовов элемента кэша с округлением вниз.
 // внутри живет мапа, из которой при необходимости будем удалять элементы из нее
 // если надо освободить какое-то количество элементов. то идем по слайсу и ищем ближайший индекс, в котором LruElement.count
@@ -29,7 +27,7 @@ const defaultMapSize = 5000000
 // мьютекс нужен, чтобы при расширении слайса мы не потеряли данные
 type LRU struct {
 	arr []*LruElement // use
-	sync.RWMutex
+	*sync.RWMutex
 
 	chEvent   chan LruEvent //неблокирующий канал событий кэша, если isBlocked выставлены, то события не принимаем - да, за небольшой период мы потеряем статистику, но зато не будет блокировки
 	isBlocked *int32
@@ -42,17 +40,30 @@ func NewLru(size int) *LRU {
 
 	bucketsCount := LogHash(size/2) + 1
 
-	arr := make([]*LruElement, bucketsCount)
-	for i := range arr {
-		arr[i] = newLruElement(size/4)
+	arr := []*LruElement{}
+
+	lruStartBuckets := size / 4
+	if lruStartBuckets <= 0 {
+		lruStartBuckets = 1
 	}
 
-	return &LRU{
-		arr:       arr,
-		//chEvent:   make(chan LruEvent, size),
-		isBlocked: &isBlocked,
-		defaultSize: size/2,
+	for i := 0; i < bucketsCount; i++ {
+		arr = append(arr, newLruElement(lruStartBuckets))
 	}
+
+	lock := sync.RWMutex{}
+
+	lru := &LRU{
+		arr:         arr,
+		RWMutex:     &lock,
+		chEvent:     make(chan LruEvent, size), //size/10
+		isBlocked:   &isBlocked,
+		defaultSize: size / 2,
+	}
+
+	go lru.do()
+
+	return lru
 }
 
 type LruElement struct {
@@ -75,64 +86,60 @@ func newLruElement(size int) *LruElement {
 }
 
 type LruEvent struct {
-	Key    int
-	Action Action
+	key    int
+	action Action
 }
 
-func (l *LRU) Add(key int) int {
-	l.Delete(key)
+func (l *LRU) Add(key int) {
+	l.chEvent <- LruEvent{key, CreateAction}
+}
 
-	bucket := l.arr[0]
-
+func (l *LRU) add(key int) {
 	l.RLock()
+	bucket := l.arr[0]
 
 	atomic.StoreInt32(bucket.isBlocked, 1)
 	bucket.Lock()
-	bucket.m[key] = startBucket
-	atomic.AddInt32(bucket.count, 1)
+	bucket.m[key] = startCount
 	bucket.Unlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
 
 	l.RUnlock()
 
-	return startBucket
+	atomic.AddInt32(bucket.count, 1)
+
+	return
 }
 
 // todo сделать горутину, принимающую события LruEvent
-// подумать, сохранять ли у самого элемента storedValue в кэше его bucket в LRU - думаю, да сохранять
-func (l *LRU) Change(key int, bucketIdx int) (int, bool) {
-	var isBucketChanged bool
+func (l *LRU) Change(key int) {
+	l.chEvent <- LruEvent{key, ChangeAction}
+}
 
-	l.RLock()
-	if bucketIdx <= incorrectIndex || bucketIdx >= len(l.arr) {
-		// incorrect bucket index
-		l.RUnlock()
-		return incorrectIndex, isBucketChanged
-	}
-
+func (l *LRU) change(key int, bucketIdx int) {
 	bucket := l.arr[bucketIdx]
 
 	if atomic.LoadInt32(l.isBlocked) == 1 || atomic.LoadInt32(bucket.isBlocked) == 1 {
 		// try to get non blocking Get cache
-		return bucketIdx, isBucketChanged
+		return
 	}
 
 	atomic.StoreInt32(bucket.isBlocked, 1)
-	bucket.Lock()
+	bucket.RLock()
 	if keyCount, ok := bucket.m[key]; ok {
+		bucket.RUnlock()
+
 		newBucketIdx := LogHash(keyCount + 1)
 		if newBucketIdx != bucketIdx {
 			var newBucket *LruElement
 
-			isBucketChanged = true
-
-			l.Delete(key, bucketIdx)
+			l.Delete(key)
 
 			bucketIdx = newBucketIdx
 
 			if bucketIdx == len(l.arr) {
 				// new bucket needed
-				newBucket = newLruElement(l.defaultSize/2)
+				newBucket = newLruElement(l.defaultSize / 2)
 
 				l.Lock()
 				l.arr = append(l.arr, newBucket)
@@ -144,25 +151,26 @@ func (l *LRU) Change(key int, bucketIdx int) (int, bool) {
 			atomic.StoreInt32(newBucket.isBlocked, 1)
 			newBucket.Lock()
 			newBucket.m[key] = keyCount + 1
-			atomic.AddInt32(newBucket.count, 1)
 			bucket.Unlock()
+
 			atomic.StoreInt32(newBucket.isBlocked, 0)
+			atomic.AddInt32(newBucket.count, 1)
 		}
 	}
-	bucket.Unlock()
+	bucket.RUnlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
 
 	l.RUnlock()
 
-	return bucketIdx, isBucketChanged
+	return
 }
 
-func (l *LRU) Delete(key int, bucketIdxs ...int) {
-	var bucketIdx int = incorrectIndex
+func (l *LRU) Delete(key int) {
+	l.chEvent <- LruEvent{key, DeleteAction}
+}
 
-	if len(bucketIdxs) > 0 {
-		bucketIdx = bucketIdxs[0]
-
+func (l *LRU) delete(key int, bucketIdx int) {
+	if bucketIdx != incorrectIndex {
 		l.RLock()
 		if bucketIdx >= len(l.arr) {
 			l.RUnlock()
@@ -193,11 +201,12 @@ func (l *LRU) Delete(key int, bucketIdxs ...int) {
 	atomic.StoreInt32(bucket.isBlocked, 1)
 	bucket.Lock()
 	delete(bucket.m, key)
-	atomic.AddInt32(bucket.count, -1)
 	bucket.Unlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
 
 	l.RUnlock()
+
+	atomic.AddInt32(bucket.count, -1)
 	return
 }
 
@@ -216,8 +225,26 @@ func (l *LRU) MinBucket() int {
 	return cacheIsEmpty
 }
 
+func (l *LRU) getBucketIdx(key int) int {
+	l.RLock()
+	for i, bucket := range l.arr {
+		bucket.RLock()
+		if _, ok := bucket.m[key]; ok {
+			bucket.RUnlock()
+			l.RUnlock()
+
+			return i
+		}
+		bucket.RUnlock()
+	}
+	l.RUnlock()
+
+	return incorrectIndex
+}
+
 // DeleteCount deletes N records from least to more used - returns slice of int keys to delete
 func (l *LRU) DeleteCount(count int) []int {
+	// make channel instead
 	keys := make([]int, 0, count)
 	i := 0
 
@@ -234,9 +261,10 @@ func (l *LRU) DeleteCount(count int) []int {
 				break
 			}
 		}
-		atomic.AddInt32(bucket.count, -1)
 		bucket.Unlock()
+
 		atomic.StoreInt32(bucket.isBlocked, 0)
+		atomic.AddInt32(bucket.count, -1)
 
 		if i >= count {
 			break
@@ -245,4 +273,30 @@ func (l *LRU) DeleteCount(count int) []int {
 	l.RUnlock()
 
 	return keys
+}
+
+func (l *LRU) do() {
+	var bucketIdx int
+
+	for event := range l.chEvent {
+		bucketIdx = l.getBucketIdx(event.key)
+
+		if bucketIdx == incorrectIndex {
+			l.add(event.key)
+			continue
+		}
+
+		switch event.action {
+		case ChangeAction:
+			l.change(event.key, bucketIdx)
+		case DeleteAction:
+			l.delete(event.key, bucketIdx)
+		}
+	}
+}
+
+func (l *LRU) Close() {
+	l.Lock()
+	close(l.chEvent)
+	l.Unlock()
 }

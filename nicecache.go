@@ -17,7 +17,7 @@ const (
 )
 
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
-var deletedValue = storedValue{TestValue{}, deletedValueFlag, deletedValueFlag, deletedValueFlag}
+var deletedValue = storedValue{TestValue{}, deletedValueFlag, deletedValueFlag}
 
 func init() {
 	if freeBatchSize < 1 {
@@ -27,7 +27,6 @@ func init() {
 
 type storedValue struct {
 	v           TestValue
-	bucketIdx   int
 	hashedKey   uint64
 	expiredTime int
 }
@@ -94,25 +93,17 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	valueIdx, ok := c.index[h]
 	c.RUnlock()
 
-	var isNewBucket bool
 	if !ok {
 		valueIdx = c.popFreeIndex()
 
 		c.Lock()
 		c.index[h] = valueIdx
 		c.Unlock()
-
-		isNewBucket = true
 	}
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
 	c.storage[valueIdx].v = *value
-
-	if isNewBucket {
-		c.storage[valueIdx].bucketIdx = c.frequency.Add(valueIdx)
-	}
-
 	c.storage[valueIdx].hashedKey = h
 	c.storage[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
 	rowLock.Unlock()
@@ -144,7 +135,7 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 		return NotFoundError
 	}
 
-	c.frequency.Change(valueIdx, result.bucketIdx)
+	c.frequency.Change(valueIdx)
 
 	*value = result.v
 	return nil
@@ -166,15 +157,12 @@ func (c *Cache) Delete(key []byte) {
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
-	bucketIdx := c.storage[valueIdx].bucketIdx
-
 	//c.storage[valueIdx] = deletedValue
-	c.storage[valueIdx].bucketIdx = deletedValueFlag
 	c.storage[valueIdx].hashedKey = deletedValueFlag
 	c.storage[valueIdx].expiredTime = deletedValueFlag
 	rowLock.Unlock()
 
-	c.frequency.Delete(valueIdx, bucketIdx)
+	c.frequency.Delete(valueIdx)
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -193,12 +181,10 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.Lock()
-	bucketIdx := c.storage[valueIdx].bucketIdx
-
 	c.storage[valueIdx] = deletedValue
 	rowLock.Unlock()
 
-	c.frequency.Delete(valueIdx, bucketIdx)
+	c.frequency.Delete(valueIdx)
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -310,8 +296,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 				iterateStoredValue = c.storage[indexInCacheArray]
 				rowLock.RUnlock()
 
-
-				c.frequency.Delete(indexInCacheArray, iterateStoredValue.bucketIdx)
+				c.frequency.Delete(indexInCacheArray)
 
 				if iterateStoredValue.expiredTime == deletedValueFlag {
 					continue
@@ -390,4 +375,6 @@ func (c *Cache) Len() int {
 
 func (c *Cache) Close() {
 	close(c.stop)
+	c.frequency.Close()
+	//c.frequency = nil
 }
