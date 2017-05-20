@@ -26,7 +26,7 @@ const (
 // не равен нули - это будет бакет с элементами с наименьшим использованием
 // мьютекс нужен, чтобы при расширении слайса мы не потеряли данные
 type LRU struct {
-	arr []*LruElement // use
+	arr []LruElement // todo make it fixed size!
 	*sync.RWMutex
 
 	chEvent   chan LruEvent //неблокирующий канал событий кэша, если isBlocked выставлены, то события не принимаем - да, за небольшой период мы потеряем статистику, но зато не будет блокировки
@@ -40,7 +40,7 @@ func NewLru(size int) *LRU {
 
 	bucketsCount := LogHash(size/2) + 1
 
-	arr := []*LruElement{}
+	arr := []LruElement{}
 
 	lruStartBuckets := size / 4
 	if lruStartBuckets <= 0 {
@@ -67,21 +67,35 @@ func NewLru(size int) *LRU {
 }
 
 type LruElement struct {
-	m map[int]int //map[indexInSlice]frequencyValue
-	sync.RWMutex
+	index [indexBuckets]elem
 	count *int32
+}
 
+type elem struct {
+	m map[int]int //map[indexInSlice]frequencyValue
+	*sync.RWMutex
 	isBlocked *int32 // on write
 }
 
-func newLruElement(size int) *LruElement {
-	isBlocked := int32(0)
+func newLruElement(size int) LruElement {
 	count := int32(0)
 
-	return &LruElement{
-		m:         make(map[int]int, size),
-		count:     &count,
-		isBlocked: &isBlocked,
+	index := [indexBuckets]elem{}
+
+	for i := 0; i < indexBuckets; i++ {
+		lock := sync.RWMutex{}
+		notBlocked := int32(0)
+
+		index[i] = elem{
+			make(map[int]int, cacheSize/indexBuckets),
+			&lock,
+			&notBlocked,
+		}
+	}
+
+	return LruElement{
+		index: index,
+		count: &count,
 	}
 }
 
@@ -95,8 +109,9 @@ func (l *LRU) Add(key int) {
 }
 
 func (l *LRU) add(key int) {
-	l.RLock()
-	bucket := l.arr[0]
+	buckets := l.arr[0]
+	bucketIdx := getBucketIntIdx(key)
+	bucket := buckets.index[bucketIdx]
 
 	atomic.StoreInt32(bucket.isBlocked, 1)
 	bucket.Lock()
@@ -104,9 +119,7 @@ func (l *LRU) add(key int) {
 	bucket.Unlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
 
-	l.RUnlock()
-
-	atomic.AddInt32(bucket.count, 1)
+	atomic.AddInt32(buckets.count, 1)
 
 	return
 }
@@ -116,8 +129,9 @@ func (l *LRU) Change(key int) {
 	l.chEvent <- LruEvent{key, ChangeAction}
 }
 
-func (l *LRU) change(key int, bucketIdx int) {
-	bucket := l.arr[bucketIdx]
+func (l *LRU) change(key int, bucketsIdx, bucketIdx int) {
+	buckets := l.arr[bucketsIdx]
+	bucket := buckets.index[bucketIdx]
 
 	if atomic.LoadInt32(l.isBlocked) == 1 || atomic.LoadInt32(bucket.isBlocked) == 1 {
 		// try to get non blocking Get cache
@@ -129,38 +143,46 @@ func (l *LRU) change(key int, bucketIdx int) {
 	if keyCount, ok := bucket.m[key]; ok {
 		bucket.RUnlock()
 
-		newBucketIdx := LogHash(keyCount + 1)
-		if newBucketIdx != bucketIdx {
-			var newBucket *LruElement
+		newBucketsIdx := LogHash(keyCount + 1)
+		if newBucketsIdx != bucketsIdx {
+			var newBuckets LruElement
 
 			l.Delete(key)
 
-			bucketIdx = newBucketIdx
+			bucketsIdx = newBucketsIdx
 
-			if bucketIdx == len(l.arr) {
+			l.RLock()
+			isIndexOverflow := (bucketsIdx == len(l.arr))
+			l.RUnlock()
+
+			if isIndexOverflow {
 				// new bucket needed
-				newBucket = newLruElement(l.defaultSize / 2)
+				newBuckets = newLruElement(l.defaultSize / 2)
 
 				l.Lock()
-				l.arr = append(l.arr, newBucket)
+				l.arr = append(l.arr, newBuckets)
 				l.Unlock()
 			} else {
-				newBucket = l.arr[bucketIdx]
+				l.RLock()
+				newBuckets = l.arr[bucketsIdx]
+				l.RUnlock()
 			}
+
+			newBucket := newBuckets.index[bucketIdx]
 
 			atomic.StoreInt32(newBucket.isBlocked, 1)
 			newBucket.Lock()
 			newBucket.m[key] = keyCount + 1
-			bucket.Unlock()
+			newBucket.Unlock()
 
 			atomic.StoreInt32(newBucket.isBlocked, 0)
-			atomic.AddInt32(newBucket.count, 1)
+			atomic.AddInt32(newBuckets.count, 1)
 		}
+
+		bucket.RLock()
 	}
 	bucket.RUnlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
-
-	l.RUnlock()
 
 	return
 }
@@ -169,34 +191,16 @@ func (l *LRU) Delete(key int) {
 	l.chEvent <- LruEvent{key, DeleteAction}
 }
 
-func (l *LRU) delete(key int, bucketIdx int) {
-	if bucketIdx != incorrectIndex {
-		l.RLock()
-		if bucketIdx >= len(l.arr) {
-			l.RUnlock()
-			return
-		}
-	} else {
-		l.RLock()
-
-		for i, bucket := range l.arr {
-			bucket.RLock()
-			if _, ok := bucket.m[key]; ok {
-				bucket.RUnlock()
-				bucketIdx = i
-				break
-			}
-			bucket.RUnlock()
-		}
-	}
-
-	if bucketIdx <= incorrectIndex {
-		// incorrect bucket index or key not found
-		l.RUnlock()
+func (l *LRU) delete(key int, bucketIdx, bucketsIdx int) {
+	if bucketsIdx == incorrectIndex {
 		return
 	}
 
-	bucket := l.arr[bucketIdx]
+	l.RLock()
+	buckets := l.arr[bucketsIdx]
+	l.Unlock()
+
+	bucket := buckets.index[bucketIdx]
 
 	atomic.StoreInt32(bucket.isBlocked, 1)
 	bucket.Lock()
@@ -204,9 +208,7 @@ func (l *LRU) delete(key int, bucketIdx int) {
 	bucket.Unlock()
 	atomic.StoreInt32(bucket.isBlocked, 0)
 
-	l.RUnlock()
-
-	atomic.AddInt32(bucket.count, -1)
+	atomic.AddInt32(buckets.count, -1)
 	return
 }
 
@@ -225,21 +227,27 @@ func (l *LRU) MinBucket() int {
 	return cacheIsEmpty
 }
 
-func (l *LRU) getBucketIdx(key int) int {
+func (l *LRU) getBucketIdx(key int) (int, int) {
+	bucketIdx := getBucketIntIdx(key)
+	var bucket elem
+
 	l.RLock()
-	for i, bucket := range l.arr {
+	for i, buckets := range l.arr {
+		l.RUnlock()
+
+		bucket = buckets.index[bucketIdx]
 		bucket.RLock()
 		if _, ok := bucket.m[key]; ok {
 			bucket.RUnlock()
-			l.RUnlock()
-
-			return i
+			return i, bucketIdx
 		}
 		bucket.RUnlock()
+
+		l.RLock()
 	}
 	l.RUnlock()
 
-	return incorrectIndex
+	return incorrectIndex, incorrectIndex
 }
 
 // DeleteCount deletes N records from least to more used - returns slice of int keys to delete
@@ -249,25 +257,28 @@ func (l *LRU) DeleteCount(count int) []int {
 	i := 0
 
 	l.RLock()
-	for _, bucket := range l.arr {
-		atomic.StoreInt32(bucket.isBlocked, 1)
-		bucket.Lock()
-		for key := range bucket.m {
-			delete(bucket.m, key)
-			keys = append(keys, key)
+	for _, buckets := range l.arr {
 
-			i++
+		for _, bucket := range buckets.index {
+			atomic.StoreInt32(bucket.isBlocked, 1)
+			bucket.Lock()
+			for key := range bucket.m {
+				delete(bucket.m, key)
+				keys = append(keys, key)
+
+				i++
+				if i >= count {
+					break
+				}
+			}
+			bucket.Unlock()
+
+			atomic.StoreInt32(bucket.isBlocked, 0)
+			atomic.AddInt32(buckets.count, -1)
+
 			if i >= count {
 				break
 			}
-		}
-		bucket.Unlock()
-
-		atomic.StoreInt32(bucket.isBlocked, 0)
-		atomic.AddInt32(bucket.count, -1)
-
-		if i >= count {
-			break
 		}
 	}
 	l.RUnlock()
@@ -276,21 +287,22 @@ func (l *LRU) DeleteCount(count int) []int {
 }
 
 func (l *LRU) do() {
+	var bucketsIdx int
 	var bucketIdx int
 
 	for event := range l.chEvent {
-		bucketIdx = l.getBucketIdx(event.key)
+		bucketsIdx, bucketIdx = l.getBucketIdx(event.key)
 
-		if bucketIdx == incorrectIndex {
+		if bucketsIdx == incorrectIndex {
 			l.add(event.key)
 			continue
 		}
 
 		switch event.action {
 		case ChangeAction:
-			l.change(event.key, bucketIdx)
+			l.change(event.key, bucketsIdx, bucketIdx)
 		case DeleteAction:
-			l.delete(event.key, bucketIdx)
+			l.delete(event.key, bucketsIdx, bucketIdx)
 		}
 	}
 }
