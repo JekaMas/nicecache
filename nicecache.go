@@ -414,8 +414,8 @@ func (c *Cache) Len() int {
 	return cacheSize - int(atomic.LoadInt32(c.freeCount))
 }
 
+//todo test for correctness and resource free
 func (c *Cache) Close() {
 	close(c.stop)
 	c.frequency.Close()
-	//c.frequency = nil
 }

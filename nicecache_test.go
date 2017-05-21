@@ -152,6 +152,33 @@ func Benchmark_Cache_Nice_SetAndGet(b *testing.B) {
 	toStore := getTestValue()
 	cache.Set(keys[0], &toStore, 180)
 
+	var i int32 = 0
+	var res TestValue
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := int(atomic.AddInt32(&i, 1))
+			cache.Set(keys[(i+1)%*repeats], &toStore, 180)
+			cache.Get(keys[i%*repeats], &res)
+		}
+	})
+	b.StopTimer()
+
+	fmt.Fprint(ioutil.Discard, res.ID)
+}
+
+func Benchmark_Cache_Nice_SetAndGet_Parallel(b *testing.B) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	keys := make([][]byte, *repeats)
+	for i := 0; i < *repeats; i++ {
+		keys[i] = []byte(strconv.Itoa(i))
+	}
+	toStore := getTestValue()
+	cache.Set(keys[0], &toStore, 180)
+
 	var res TestValue
 	b.ReportAllocs()
 	b.ResetTimer()
