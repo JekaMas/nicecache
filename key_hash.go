@@ -4,6 +4,6 @@ import (
 	"github.com/dgryski/go-farm"
 )
 
-func getHash(item []byte) uint64 {
-	return farm.Hash64(item)
+func getHash(key []byte) uint64 {
+	return farm.Hash64(key)
 }

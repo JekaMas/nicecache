@@ -1,5 +1,5 @@
 package nicecache
 
-func getBucketIdx(h uint64) int {
+func getBucketIDs(h uint64) int {
 	return int(h % indexBuckets)
 }

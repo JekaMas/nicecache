@@ -18,7 +18,7 @@ func Benchmark_BucketHash(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		bucketHashTest = getBucketIdx(hs[i%*repeats])
+		bucketHashTest = getBucketIDs(hs[i%*repeats])
 	}
 }
 

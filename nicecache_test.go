@@ -8,12 +8,12 @@ import (
 	"github.com/JekaMas/pretty"
 )
 
-func TestCache_Get_OneKey(t *testing.T) {
+func TestCache_Get_OneKeyExists(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -32,12 +32,50 @@ func TestCache_Get_OneKey(t *testing.T) {
 	}
 }
 
+func TestCache_Get_OneKey_NotExists(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	key = []byte(strconv.Itoa(2))
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+}
+
+func TestCache_Get_OneKey_NilValue(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Get(key, nil)
+	if err != NilValueError {
+		t.Fatal(err)
+	}
+}
+
 func TestCache_Get_OneKey_Repeat(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -73,7 +111,7 @@ func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, shortTime)
 	if err != nil {
@@ -114,7 +152,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, shortTime)
 	if err != nil {
@@ -155,7 +193,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, shortTime)
 	if err != nil {
@@ -178,6 +216,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
 	}
 
 	//second key
+	toStore = testValues[1]
 	key2 := []byte(strconv.Itoa(2))
 
 	err = cache.Set(key2, &toStore, longTime)
@@ -238,8 +277,96 @@ func TestCache_Get_ManyKeys_TTL(t *testing.T) {
 
 }
 
-func TestCache_Flush(t *testing.T) {
+func TestCache_Get_Close(t *testing.T) {
+	cache := NewNiceCache()
+	cache.Close()
 
+	gotValue := TestValue{}
+	err := cache.Get([]byte{1}, &gotValue)
+	if err != CloseError {
+		t.Fatal(err)
+	}
+}
+
+func TestCache_Flush(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Flush_Close(t *testing.T) {
+	cache := NewNiceCache()
+	cache.Close()
+
+	err := cache.Flush()
+	if err != CloseError {
+		t.Fatal(err)
+	}
+}
+
+func TestCache_Flush_Repeat(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+
+	// repeat
+	err = cache.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
 }
 
 func TestCache_Delete(t *testing.T) {
@@ -247,7 +374,7 @@ func TestCache_Delete(t *testing.T) {
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -270,12 +397,22 @@ func TestCache_Delete(t *testing.T) {
 	}
 }
 
+func TestCache_Delete_Close(t *testing.T) {
+	cache := NewNiceCache()
+	cache.Close()
+
+	err := cache.Delete([]byte{1})
+	if err != CloseError {
+		t.Fatal(err)
+	}
+}
+
 func TestCache_Delete_Repeat(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -327,7 +464,7 @@ func TestCache_Len_One(t *testing.T) {
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -339,13 +476,35 @@ func TestCache_Len_One(t *testing.T) {
 	}
 }
 
+func TestCache_Len_Close(t *testing.T) {
+	cache := NewNiceCache()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	cache.Close()
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
 func TestCache_Len_Many(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		key := []byte(strconv.Itoa(i))
-		toStore := getTestValue()
+		toStore := testValues[i]
 
 		err := cache.Set(key, &toStore, longTime)
 		if err != nil {
@@ -362,7 +521,7 @@ func TestCache_Close(t *testing.T) {
 	cache := NewNiceCache()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -381,12 +540,36 @@ func TestCache_Close(t *testing.T) {
 	}
 }
 
+func TestCache_Close_Repeat(t *testing.T) {
+	cache := NewNiceCache()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache.Close()
+	cache.Close()
+
+	err = cache.Set(key, &toStore, longTime)
+	if err != CloseError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
 func TestCache_Set_One_Repeat(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
-	toStore := getTestValue()
+	toStore := testValues[0]
 
 	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
@@ -409,6 +592,7 @@ func TestCache_Set_One_Repeat(t *testing.T) {
 	}
 
 	//retry
+	toStore = testValues[1]
 	err = cache.Set(key, &toStore, longTime)
 	if err != nil {
 		t.Fatal(err)

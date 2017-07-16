@@ -8,11 +8,19 @@ import (
 
 const (
 	cacheSize    = 1024 * 1024 * 10
-	indexBuckets = 100
+	indexBuckets = 100 // how many buckets for cache items
 
-	freeBatchPercent   = 1
-	alpha              = 1 // Percent increasing speed of freeBatchSize
-	maxFreeRatePercent = 33
+	// forced gc
+	freeBatchPercent   = 1  // how many items gc process in one step, in percent
+	alpha              = 1  // Percent increasing speed of freeBatchSize
+	maxFreeRatePercent = 33 // maximal number of items for one gc step, in percent
+
+	// normal gc
+	// GC full circle takes time = gcTime*(cacheSize/gcChunkSize)
+	// TODO: gcTime and gcChunkPercent could be tuned manually or automatic
+	gcTime         = 1 * time.Second                  // how often gc runs
+	gcChunkPercent = 1                                // percent of items to proceed in gc step
+	gcChunkSize    = cacheSize * gcChunkPercent / 100 // number of items to proceed in gc step
 
 	deletedValueFlag = 0
 )
@@ -47,11 +55,11 @@ type Cache struct {
 	startClearingCh chan struct{}
 	endClearingCh   chan struct{}
 
-	stop chan struct{}
-	sync.RWMutex
+	stop      chan struct{}
+	isStopped int32
+	stateLock sync.RWMutex
 }
 
-// TODO: добавить логер, метрику в виде определяемых интерфейсов
 func NewNiceCache() *Cache {
 	freeIndexes := make([]int, cacheSize)
 	for i := 0; i < cacheSize; i++ {
@@ -96,8 +104,12 @@ func NewNiceCache() *Cache {
 }
 
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
+	if c.isClosed() {
+		return CloseError
+	}
+
 	h := getHash(key)
-	bucketIdx := getBucketIdx(h)
+	bucketIdx := getBucketIDs(h)
 	indexBucketLock := c.indexLocks[bucketIdx]
 	indexBucket := c.index[bucketIdx]
 
@@ -123,8 +135,16 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 }
 
 func (c *Cache) Get(key []byte, value *TestValue) error {
+	if c.isClosed() {
+		return CloseError
+	}
+
+	if value == nil {
+		return NilValueError
+	}
+
 	h := getHash(key)
-	bucketIdx := getBucketIdx(h)
+	bucketIdx := getBucketIDs(h)
 	indexBucketLock := c.indexLocks[bucketIdx]
 	indexBucket := c.index[bucketIdx]
 
@@ -136,14 +156,14 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 		return NotFoundError
 	}
 
-	if value == nil {
-		return NilValueError
-	}
-
 	rowLock := c.storageLocks[valueIdx]
 	rowLock.RLock()
 	result := c.storage[valueIdx]
 	rowLock.RUnlock()
+
+	if result.expiredTime == deletedValueFlag {
+		return NotFoundError
+	}
 
 	if (result.expiredTime - int(time.Now().Unix())) <= 0 {
 		c.delete(h, valueIdx)
@@ -154,9 +174,13 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 	return nil
 }
 
-func (c *Cache) Delete(key []byte) {
+func (c *Cache) Delete(key []byte) error {
+	if c.isClosed() {
+		return CloseError
+	}
+
 	h := getHash(key)
-	bucketIdx := getBucketIdx(h)
+	bucketIdx := getBucketIDs(h)
 	indexBucketLock := c.indexLocks[bucketIdx]
 	indexBucket := c.index[bucketIdx]
 
@@ -175,24 +199,29 @@ func (c *Cache) Delete(key []byte) {
 	rowLock.Unlock()
 
 	if !ok {
-		return
+		return nil
 	}
 
 	c.pushFreeIndex(valueIdx)
+	return nil
 }
 
+// delete item by it bucket hash and index in bucket
 func (c *Cache) delete(h uint64, valueIdx int) {
-	bucketIdx := getBucketIdx(h)
+	bucketIdx := getBucketIDs(h)
 	indexBucketLock := c.indexLocks[bucketIdx]
 	indexBucket := c.index[bucketIdx]
 
-	indexBucketLock.RLock()
-	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
-	if !ok {
-		return
-	}
+	/*
+		indexBucketLock.RLock()
+		valueIdx, ok := indexBucket[h]
+		indexBucketLock.RUnlock()
+		if !ok {
+			return
+		}
+	*/
 
+	//
 	indexBucketLock.Lock()
 	delete(indexBucket, h)
 	indexBucketLock.Unlock()
@@ -205,14 +234,17 @@ func (c *Cache) delete(h uint64, valueIdx int) {
 	c.pushFreeIndex(valueIdx)
 }
 
+// get one index from storage to store new item
 func (c *Cache) popFreeIndex() int {
 	freeIdx := int(-1)
 	for c.removeFreeIndex(&freeIdx) < 0 {
+		// all cache is full
 		endClearingCh := c.forceClearCache()
 		<-endClearingCh
 	}
 
 	if freeIdx > len(c.freeIndexes)-1 || freeIdx < 0 {
+		// fixme dont panic
 		panic(freeIdx)
 	}
 
@@ -226,7 +258,33 @@ func (c *Cache) forceClearCache() chan struct{} {
 		c.startClearingCh <- struct{}{}
 	}
 	return c.endClearingCh
+}
 
+// push back index to mark it as free in cache storage
+func (c *Cache) pushFreeIndex(valueIdx int) {
+	freeIdx := c.addFreeIndex()
+
+	c.freeIndexes[freeIdx] = valueIdx
+}
+
+// increase freeIndexCount and returns new last free index
+func (c *Cache) addFreeIndex() int {
+	return int(atomic.AddInt32(c.freeCount, int32(1))) - 1 //Idx == new freeCount - 1 == old freeCount
+}
+
+// decrease freeIndexCount and returns new last free index
+func (c *Cache) removeFreeIndex(idx *int) int {
+	*idx = int(atomic.AddInt32(c.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
+	if *idx < 0 {
+		atomic.AddInt32(c.freeCount, int32(1))
+		return -1
+	}
+	return *idx
+}
+
+// increase freeIndexCount by N and returns new last free index
+func (c *Cache) addNFreeIndex(n int) int {
+	return int(atomic.AddInt32(c.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
 }
 
 func (c *Cache) clearCache(startClearingCh chan struct{}) {
@@ -235,11 +293,10 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 		nowTime time.Time
 		now     int
-		cyrcle  int
+		circle  int
 
-		gcTicker = time.NewTicker(1 * time.Hour)
+		gcTicker = time.NewTicker(gcTime)
 
-		clearChunkSize      = cacheSize / 100 // 1% over cache size
 		currentChunk        int
 		currentChunkIndexes [2]int
 		indexInCacheArray   int
@@ -252,13 +309,13 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 		rowLock *sync.RWMutex
 	)
 
-	chunks, _ := chunks(cacheSize, clearChunkSize)
+	// even for strange gcChunkSize chunks func guarantees that all indexes will present in result chunks
+	chunks, _ := chunks(cacheSize, gcChunkSize)
 
 	for {
 		select {
 		case <-startClearingCh:
-			// TODO заменить на lru?
-			// Мне не нужно хранить весь список элементов с их частотой использования для lru. мне достаточно хранить НЕ БОЛЕЕ количества, которое будет очищено, то есть от freeBatchPercent до (cacheSize*maxFreeRatePercent)/100, но не менее 1. Мне не нужен большой двусвязный список, возможно удастся обойтись обычным отсортированным списком
+			// forced gc
 			i := 0
 
 			for bucketIdx, bucket := range c.index {
@@ -307,9 +364,10 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			atomic.StoreInt32(c.onClearing, 0)
 			close(c.endClearingCh)
 		case nowTime = <-gcTicker.C:
+			// by time garbage collector
 			now = int(nowTime.Unix())
 
-			currentChunk = cyrcle % len(chunks)
+			currentChunk = circle % len(chunks)
 			currentChunkIndexes = chunks[currentChunk]
 
 			for idx := range c.storage[currentChunkIndexes[0]:currentChunkIndexes[1]] {
@@ -347,7 +405,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 				freeIndexes = freeIndexes[:0]
 			}
 
-			cyrcle++
+			circle++
 		case <-c.stop:
 			gcTicker.Stop()
 			return
@@ -355,33 +413,12 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 	}
 }
 
-func (c *Cache) pushFreeIndex(key int) {
-	freeIdx := c.addFreeIndex()
-	c.freeIndexes[freeIdx] = key
-}
-
-// increase freeIndexCount and returns new last free index
-func (c *Cache) addFreeIndex() int {
-	return int(atomic.AddInt32(c.freeCount, int32(1))) - 1 //Idx == new freeCount - 1 == old freeCount
-}
-
-// decrease freeIndexCount and returns new last free index
-func (c *Cache) removeFreeIndex(idx *int) int {
-	*idx = int(atomic.AddInt32(c.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
-	if *idx < 0 {
-		atomic.AddInt32(c.freeCount, int32(1))
-		return -1
+func (c *Cache) Flush() error {
+	if c.isClosed() {
+		return CloseError
 	}
-	return *idx
-}
 
-// increase freeIndexCount by N and returns new last free index
-func (c *Cache) addNFreeIndex(n int) int {
-	return int(atomic.AddInt32(c.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
-}
-
-func (c *Cache) Flush() {
-	c.Lock()
+	c.stateLock.Lock()
 	for bucketIdx := range c.index {
 		indexBucketLock := c.indexLocks[bucketIdx]
 
@@ -396,13 +433,28 @@ func (c *Cache) Flush() {
 
 		indexBucketLock.Unlock()
 	}
-	c.Unlock()
+	c.stateLock.Unlock()
+
+	return nil
 }
 
 func (c *Cache) Len() int {
+	if c.isClosed() {
+		return 0
+	}
+
 	return cacheSize - int(atomic.LoadInt32(c.freeCount))
 }
 
 func (c *Cache) Close() {
+	if c.isClosed() {
+		return
+	}
+
 	close(c.stop)
+	atomic.StoreInt32(&c.isStopped, 1)
+}
+
+func (c *Cache) isClosed() bool {
+	return atomic.LoadInt32(&c.isStopped) == 1
 }
