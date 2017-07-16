@@ -1,0 +1,6 @@
+hash: 7f85887cad21d5e1fe9598263c0cef615fbd8910ab6042f2963aa3a6f4fddfd3
+updated: 2017-07-15T14:34:50.569962575+03:00
+imports:
+- name: github.com/dgryski/go-farm
+  version: e2d0fe22b456fa0a35cd883ba355ecfcf1881490
+testImports: []

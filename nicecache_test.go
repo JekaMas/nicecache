@@ -1,265 +1,451 @@
 package nicecache
 
 import (
-	"fmt"
-	"io/ioutil"
 	"strconv"
-	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/JekaMas/pretty"
 )
 
-// TODO сделать тесты при кэше прогретом на 10, 30, 50, 100%
-var testsize = (cacheSize * 1) / 100
-var repeats = &testsize
-
-func Benchmark_Cache_Nice_Set(b *testing.B) {
+func TestCache_Get_OneKey(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
-	keys := make([][]byte, *repeats)
-	for i := 0; i < *repeats; i++ {
-		keys[i] = []byte(strconv.Itoa(i))
-	}
+	key := []byte(strconv.Itoa(1))
 	toStore := getTestValue()
 
-	var err error
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		e := cache.Set(keys[i%*repeats], &toStore, 180)
-		if e != nil {
-			err = e
-		}
-	}
-	b.StopTimer()
-
+	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
-		fmt.Fprint(ioutil.Discard, "ERROR!!! SET ", err)
+		t.Fatal(err)
 	}
-}
 
-func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
-	cache := NewNiceCache()
-	defer cache.Close()
-
-	keys := make([][]byte, *repeats)
-	for i := 0; i < *repeats; i++ {
-		keys[i] = []byte(strconv.Itoa(i))
-	}
-	toStore := getTestValue()
-
-	var i int32 = 0
-	var err error
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := atomic.AddInt32(&i, 1)
-			e := cache.Set(keys[int(i)%*repeats], &toStore, 180)
-			if e != nil {
-				err = e
-			}
-		}
-	})
-	b.StopTimer()
-
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
 	if err != nil {
-		fmt.Fprint(ioutil.Discard, "ERROR!!! SET ", err)
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
 	}
 }
 
-func Benchmark_Cache_Nice_Get(b *testing.B) {
+func TestCache_Get_OneKey_Repeat(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
-	keys := make([][]byte, *repeats)
-	for i := 0; i < *repeats; i++ {
-		keys[i] = []byte(strconv.Itoa(i))
-	}
+	key := []byte(strconv.Itoa(1))
 	toStore := getTestValue()
 
-	for i := 0; i < *repeats; i++ {
-		err := cache.Set(keys[i], &toStore, 180)
-		if err != nil {
-			fmt.Fprint(ioutil.Discard, "ERROR!!! SET: ", err)
-		}
-	}
-
-	var (
-		res TestValue
-		err error
-	)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err = cache.Get(keys[i%*repeats], &res)
-		if err != nil {
-			fmt.Fprint(ioutil.Discard, "ERROR!!! GET ", err)
-		}
-	}
-	b.StopTimer()
-
-	fmt.Fprint(ioutil.Discard, res.ID)
-}
-
-func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
-	cache := NewNiceCache()
-	defer cache.Close()
-
-	keys := make([][]byte, *repeats)
-	for i := 0; i < *repeats; i++ {
-		keys[i] = []byte(strconv.Itoa(i))
-	}
-	toStore := getTestValue()
-
-	for i := 0; i < *repeats; i++ {
-		err := cache.Set(keys[i], &toStore, 180)
-		if err != nil {
-			fmt.Fprint(ioutil.Discard, "ERROR!!! SET ", err)
-		}
-	}
-
-	var i int32 = 0
-	var err error
-	var res TestValue
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := atomic.AddInt32(&i, 1)
-			e := cache.Get(keys[int(i)%*repeats], &res)
-			if e != nil {
-				err = e
-			}
-		}
-	})
-	b.StopTimer()
-
+	err := cache.Set(key, &toStore, longTime)
 	if err != nil {
-		fmt.Fprint(ioutil.Discard, "ERROR!!! GET ", err)
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	//retry
+	gotValue = TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff = pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
 	}
 }
 
-func Benchmark_Cache_Nice_SetAndGet(b *testing.B) {
+func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
 	cache := NewNiceCache()
 	defer cache.Close()
 
-	keys := make([][]byte, *repeats)
-	for i := 0; i < *repeats; i++ {
-		keys[i] = []byte(strconv.Itoa(i))
-	}
+	key := []byte(strconv.Itoa(1))
 	toStore := getTestValue()
-	cache.Set(keys[0], &toStore, 180)
 
-	var res TestValue
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cache.Set(keys[(i+1)%*repeats], &toStore, 180)
-		cache.Get(keys[i%*repeats], &res)
+	err := cache.Set(key, &toStore, shortTime)
+	if err != nil {
+		t.Fatal(err)
 	}
-	b.StopTimer()
 
-	fmt.Fprint(ioutil.Discard, res.ID)
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	//retry after TTL
+	time.Sleep(shortTime * 2 * time.Second)
+
+	gotValue = TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
 }
 
-func getTestValue() TestValue {
-	return testValue
+func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, shortTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	//retry after TTL
+	time.Sleep(shortTime * 120 * time.Second)
+
+	gotValue = TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
 }
 
-var t = true
-var id = uint32(21)
+func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
 
-var testValue = TestValue{
-	ID:           "1236564774641241249748124978917490",
-	N:            6,
-	Stat:         2,
-	Published:    false,
-	Deprecated:   &t,
-	System:       43,
-	Subsystem:    12,
-	ParentID:     "4128934712974129075901235791027540",
-	Name:         "some interesting test value!",
-	Name2:        "once apon a time caches were fast and safe...",
-	Description:  "yeah!!!",
-	Description2: "yeah!!! yeah!!! yeah!!! yeah!!! yeah!!!",
-	CreatedBy:    36,
-	UpdatedBy:    &id,
-	List1:        []uint32{1, 2, 3, 4, 5},
-	List2:        []uint32{6, 4, 3, 6, 8, 3, 4, 5, 6},
-	Items: []TestItem{
-		{
-			ID:           "1236564774641241249748124978917490",
-			N:            6,
-			Stat:         2,
-			Published:    false,
-			Deprecated:   &t,
-			System:       43,
-			Subsystem:    12,
-			ParentID:     "4128934712974129075901235791027540",
-			Name:         "some interesting test value!",
-			Name2:        "once apon a time caches were fast and safe...",
-			Description:  "yeah!!!",
-			Description2: "yeah!!! yeah!!! yeah!!! yeah!!! yeah!!!",
-			CreatedBy:    36,
-			UpdatedBy:    &id,
-			List1:        []uint32{1, 2, 3, 4, 5},
-			List2:        []uint32{6, 4, 3, 6, 8, 3, 4, 5, 6},
-		},
-		{
-			ID:           "1236564774641241249748124978917490",
-			N:            6,
-			Stat:         2,
-			Published:    false,
-			Deprecated:   &t,
-			System:       43,
-			Subsystem:    12,
-			ParentID:     "4128934712974129075901235791027540",
-			Name:         "some interesting test value!",
-			Name2:        "once apon a time caches were fast and safe...",
-			Description:  "yeah!!!",
-			Description2: "yeah!!! yeah!!! yeah!!! yeah!!! yeah!!!",
-			CreatedBy:    36,
-			UpdatedBy:    &id,
-			List1:        []uint32{1, 2, 3, 4, 5},
-			List2:        []uint32{6, 4, 3, 6, 8, 3, 4, 5, 6},
-		},
-		{
-			ID:           "1236564774641241249748124978917490",
-			N:            6,
-			Stat:         2,
-			Published:    false,
-			Deprecated:   &t,
-			System:       43,
-			Subsystem:    12,
-			ParentID:     "4128934712974129075901235791027540",
-			Name:         "some interesting test value!",
-			Name2:        "once apon a time caches were fast and safe...",
-			Description:  "yeah!!!",
-			Description2: "yeah!!! yeah!!! yeah!!! yeah!!! yeah!!!",
-			CreatedBy:    36,
-			UpdatedBy:    &id,
-			List1:        []uint32{1, 2, 3, 4, 5},
-			List2:        []uint32{6, 4, 3, 6, 8, 3, 4, 5, 6},
-		},
-		{
-			ID:           "1236564774641241249748124978917490",
-			N:            6,
-			Stat:         2,
-			Published:    false,
-			Deprecated:   &t,
-			System:       43,
-			Subsystem:    12,
-			ParentID:     "4128934712974129075901235791027540",
-			Name:         "some interesting test value!",
-			Name2:        "once apon a time caches were fast and safe...",
-			Description:  "yeah!!!",
-			Description2: "yeah!!! yeah!!! yeah!!! yeah!!! yeah!!!",
-			CreatedBy:    36,
-			UpdatedBy:    &id,
-			List1:        []uint32{1, 2, 3, 4, 5},
-			List2:        []uint32{6, 4, 3, 6, 8, 3, 4, 5, 6},
-		},
-	},
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, shortTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	//second key
+	key2 := []byte(strconv.Itoa(2))
+
+	err = cache.Set(key2, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue = TestValue{}
+	err = cache.Get(key2, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff = pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 2 {
+		t.Fatal(n)
+	}
+
+	//retry after TTL
+	time.Sleep(shortTime * 120 * time.Second)
+
+	// expired key
+	gotValue = TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	// live key
+	gotValue = TestValue{}
+	err = cache.Get(key2, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive_ManyCircles(t *testing.T) {
+
+}
+
+func TestCache_Get_ManyKeys(t *testing.T) {
+
+}
+
+func TestCache_Get_ManyKeys_TTL(t *testing.T) {
+
+}
+
+func TestCache_Flush(t *testing.T) {
+
+}
+
+func TestCache_Delete(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Delete(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Delete_Repeat(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Delete(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+
+	// repeat
+	err = cache.Delete(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cache.Get(key, &gotValue)
+	if err != NotFoundError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Len_Zero(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Len_One(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Len_Many(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	for i := 0; i < 3; i++ {
+		key := []byte(strconv.Itoa(i))
+		toStore := getTestValue()
+
+		err := cache.Set(key, &toStore, longTime)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if n := cache.Len(); n != i+1 {
+			t.Fatal(n)
+		}
+	}
+}
+
+func TestCache_Close(t *testing.T) {
+	cache := NewNiceCache()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache.Close()
+
+	err = cache.Set(key, &toStore, longTime)
+	if err != CloseError {
+		t.Fatal(err)
+	}
+
+	if n := cache.Len(); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Set_One_Repeat(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
+
+	key := []byte(strconv.Itoa(1))
+	toStore := getTestValue()
+
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+
+	//retry
+	err = cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotValue = TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff = pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n != 1 {
+		t.Fatal(n)
+	}
+}
+
+func TestCache_Set_Overflow(t *testing.T) {
+
+}
+
+func TestCache_Set_Overflow_ManyTimes(t *testing.T) {
+
+}
+
+func TestCache_Set_Overflow_Flush_ManyTimes(t *testing.T) {
+
+}
+
+func TestCache_Set_Overflow_KeysExpired_Overflow(t *testing.T) {
+
+}
+
+func TestCache_Set_FullCache_RandomKeys(t *testing.T) {
+
 }
