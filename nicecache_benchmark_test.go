@@ -13,7 +13,7 @@ var testsize = (cacheSize * 1) / 100
 var repeats = &testsize
 
 const (
-	longTime = 600000
+	longTime  = 600000
 	shortTime = 1
 )
 
@@ -202,8 +202,8 @@ func Benchmark_Cache_Nice_SetAndGet_Parallel(b *testing.B) {
 }
 
 var (
-	t = true
-	f = false
+	t   = true
+	f   = false
 	ids = []uint32{21, 12}
 )
 

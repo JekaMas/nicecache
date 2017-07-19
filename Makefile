@@ -7,12 +7,12 @@ deps:
 	go glide install --force
 
 benchmark:
-	go test -bench=. -benchmem -benchtime=60s -timeout=6000000s -v
+	go test -bench=. -benchmem -benchtime=20s -timeout=6000000s -v
 
 test:
 	go test -timeout=180s -v
 
 benchmark-race:
-	go test -race -bench=. -benchmem -benchtime=60s -timeout=6000000s -v
+	go test -race -bench=. -benchmem -benchtime=20s -timeout=6000000s -v
 
 .PHONY: benchmark-race benchmark test deps get-glide
