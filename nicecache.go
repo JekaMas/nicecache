@@ -275,6 +275,7 @@ func (c *Cache) addFreeIndex() int {
 }
 
 // decrease freeIndexCount and returns new last free index
+// todo check if i can use atomic.Cond for this
 func (c *Cache) removeFreeIndex(idx *int) int {
 	*idx = int(atomic.AddInt32(c.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
 	if *idx < 0 {

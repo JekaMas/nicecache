@@ -9,7 +9,6 @@ import (
 )
 
 func TestCache_Get_OneKeyExists(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -34,7 +33,6 @@ func TestCache_Get_OneKeyExists(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_NotExists(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -55,7 +53,6 @@ func TestCache_Get_OneKey_NotExists(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_NilValue(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -74,7 +71,6 @@ func TestCache_Get_OneKey_NilValue(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_Repeat(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -111,7 +107,6 @@ func TestCache_Get_OneKey_Repeat(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -153,7 +148,6 @@ func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -195,7 +189,6 @@ func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -289,7 +282,6 @@ func TestCache_Get_Set_LongTime_CheckMemoryLeak(t *testing.T) {
 }
 
 func TestCache_Get_Close(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	cache.Close()
 
@@ -301,7 +293,6 @@ func TestCache_Get_Close(t *testing.T) {
 }
 
 func TestCache_Flush(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -330,7 +321,6 @@ func TestCache_Flush(t *testing.T) {
 }
 
 func TestCache_Flush_Close(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	cache.Close()
 
@@ -341,7 +331,6 @@ func TestCache_Flush_Close(t *testing.T) {
 }
 
 func TestCache_Flush_Repeat(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -385,7 +374,6 @@ func TestCache_Flush_Repeat(t *testing.T) {
 }
 
 func TestCache_Delete(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -414,7 +402,6 @@ func TestCache_Delete(t *testing.T) {
 }
 
 func TestCache_Delete_Close(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	cache.Close()
 
@@ -425,7 +412,6 @@ func TestCache_Delete_Close(t *testing.T) {
 }
 
 func TestCache_Delete_Repeat(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -469,7 +455,6 @@ func TestCache_Delete_Repeat(t *testing.T) {
 }
 
 func TestCache_Len_Zero(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -479,7 +464,6 @@ func TestCache_Len_Zero(t *testing.T) {
 }
 
 func TestCache_Len_One(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -497,7 +481,6 @@ func TestCache_Len_One(t *testing.T) {
 }
 
 func TestCache_Len_Close(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 
 	key := []byte(strconv.Itoa(1))
@@ -520,7 +503,6 @@ func TestCache_Len_Close(t *testing.T) {
 }
 
 func TestCache_Len_Many(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
@@ -540,7 +522,6 @@ func TestCache_Len_Many(t *testing.T) {
 }
 
 func TestCache_Close(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 
 	key := []byte(strconv.Itoa(1))
@@ -564,7 +545,6 @@ func TestCache_Close(t *testing.T) {
 }
 
 func TestCache_Close_Repeat(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 
 	key := []byte(strconv.Itoa(1))
@@ -589,7 +569,6 @@ func TestCache_Close_Repeat(t *testing.T) {
 }
 
 func TestCache_Set_One_Repeat(t *testing.T) {
-	t.SkipNow()
 	cache := NewNiceCache()
 	defer cache.Close()
 
