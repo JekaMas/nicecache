@@ -479,22 +479,22 @@ func (c *Cache) Close() {
 	atomic.StoreInt32(c.isStopped, 1)
 
 	/*
-	go func() {
-		//todo is this best solution?
-		time.Sleep(5 * time.Second)
+		go func() {
+			//todo is this best solution?
+			time.Sleep(5 * time.Second)
 
-		c.storage = nil
-		c.freeIndexes = nil
+			c.storage = nil
+			c.freeIndexes = nil
 
-		for i := 0; i < cacheSize; i++ {
-			c.storageLocks[i] = nil
-		}
+			for i := 0; i < cacheSize; i++ {
+				c.storageLocks[i] = nil
+			}
 
-		for i := 0; i < indexBuckets; i++ {
-			c.index[i] = nil
-			c.indexLocks[i] = nil
-		}
-	}()
+			for i := 0; i < indexBuckets; i++ {
+				c.index[i] = nil
+				c.indexLocks[i] = nil
+			}
+		}()
 	*/
 }
 
