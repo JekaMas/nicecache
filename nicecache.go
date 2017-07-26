@@ -437,6 +437,7 @@ func (c *Cache) Flush() error {
 
 	c.Close()
 
+	// todo resolve data race
 	c.storage = newCache.storage
 	c.storageLocks = newCache.storageLocks
 
@@ -477,9 +478,10 @@ func (c *Cache) Close() {
 	close(c.stop)
 	atomic.StoreInt32(c.isStopped, 1)
 
+	/*
 	go func() {
 		//todo is this best solution?
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 
 		c.storage = nil
 		c.freeIndexes = nil
@@ -493,6 +495,7 @@ func (c *Cache) Close() {
 			c.indexLocks[i] = nil
 		}
 	}()
+	*/
 }
 
 func (c *Cache) isClosed() bool {
