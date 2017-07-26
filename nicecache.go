@@ -61,6 +61,10 @@ type Cache struct {
 }
 
 func NewNiceCache() *Cache {
+	return newNiceCache()
+}
+
+func newNiceCache() *Cache {
 	freeIndexes := make([]int, cacheSize)
 	for i := 0; i < cacheSize; i++ {
 		freeIndexes[i] = i
@@ -424,30 +428,35 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 	}
 }
 
-//fixme it looks like this eats A LOT of memory
 func (c *Cache) Flush() error {
 	if c.isClosed() {
 		return CloseError
 	}
 
-	//todo remove me
-	atomic.StoreInt32(c.freeCount, cacheSize)
-	return nil
+	newCache := newNiceCache()
 
-	atomic.StoreInt32(c.onFlushing, 1)
-	for i := 0; i < cacheSize; i++ {
-		c.freeIndexes[i] = i
-	}
-	atomic.StoreInt32(c.freeCount, cacheSize)
+	c.Close()
 
-	for bucketIdx := range c.index {
-		indexBucketLock := c.indexLocks[bucketIdx]
+	c.storage = newCache.storage
+	c.storageLocks = newCache.storageLocks
 
-		indexBucketLock.Lock()
-		c.index[bucketIdx] = make(map[uint64]int, cacheSize)
-		indexBucketLock.Unlock()
-	}
-	atomic.StoreInt32(c.onFlushing, 0)
+	c.index = newCache.index
+	c.indexLocks = newCache.indexLocks
+
+	c.freeIndexesLock = newCache.freeIndexesLock
+	c.freeIndexes = newCache.freeIndexes
+	c.freeCount = newCache.freeCount
+	c.freeIndexCh = newCache.freeIndexCh
+
+	c.onClearing = newCache.onClearing
+	c.startClearingCh = newCache.startClearingCh
+	c.endClearingCh = newCache.endClearingCh
+
+	c.stop = newCache.stop
+	c.onFlushing = newCache.onFlushing
+
+	// should be last
+	c.isStopped = newCache.isStopped
 
 	return nil
 }

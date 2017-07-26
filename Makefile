@@ -10,7 +10,10 @@ benchmark:
 	go test -bench=. -benchmem -benchtime=20s -timeout=6000000s -v
 
 test:
-	go test -timeout=180s -v
+	go test -timeout=360s -v
+
+test-race:
+	go test -timeout=360000s -race -v
 
 benchmark-race:
 	go test -race -bench=. -benchmem -benchtime=20s -timeout=6000000s -v
