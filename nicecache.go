@@ -56,7 +56,7 @@ type Cache struct {
 	endClearingCh   chan struct{}
 
 	stop       chan struct{}
-	isStopped  int32
+	isStopped  *int32
 	onFlushing *int32
 }
 
@@ -68,36 +68,33 @@ func NewNiceCache() *Cache {
 
 	storageLocks := [cacheSize]*sync.RWMutex{}
 	for i := 0; i < cacheSize; i++ {
-		lock := sync.RWMutex{}
-		storageLocks[i] = &lock
+		storageLocks[i] = new(sync.RWMutex)
 	}
 
 	index := [indexBuckets]map[uint64]int{}
 	indexLocks := [indexBuckets]*sync.RWMutex{}
 	for i := 0; i < indexBuckets; i++ {
-		lock := sync.RWMutex{}
 		index[i] = make(map[uint64]int, cacheSize/indexBuckets)
-		indexLocks[i] = &lock
+		indexLocks[i] = new(sync.RWMutex)
 	}
 
 	n := int32(len(freeIndexes))
 	freeCount := &n
 
-	onClearing := int32(0)
-	onFlushing := int32(0)
 	c := &Cache{
-		storage:         &[cacheSize]storedValue{},
+		storage:         new([cacheSize]storedValue),
 		storageLocks:    storageLocks,
 		index:           index,
 		indexLocks:      indexLocks,
 		freeIndexes:     freeIndexes,
 		freeCount:       freeCount,
-		onClearing:      &onClearing,
+		onClearing:      new(int32),
 		freeIndexCh:     make(chan struct{}, freeBatchSize),
 		startClearingCh: make(chan struct{}, 1),
 		endClearingCh:   make(chan struct{}),
 		stop:            make(chan struct{}),
-		onFlushing:      &onFlushing,
+		onFlushing:      new(int32),
+		isStopped:       new(int32),
 	}
 
 	go c.clearCache(c.startClearingCh)
@@ -168,7 +165,7 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 	}
 
 	if (result.expiredTime - int(time.Now().Unix())) <= 0 {
-		c.delete(h, valueIdx)
+		c.deleteItem(h, valueIdx)
 		return NotFoundError
 	}
 
@@ -208,8 +205,8 @@ func (c *Cache) Delete(key []byte) error {
 	return nil
 }
 
-// delete item by it bucket hash and index in bucket
-func (c *Cache) delete(h uint64, valueIdx int) {
+// deleteItem item by it bucket hash and index in bucket
+func (c *Cache) deleteItem(h uint64, valueIdx int) {
 	bucketIdx := getBucketIDs(h)
 	indexBucketLock := c.indexLocks[bucketIdx]
 	indexBucket := c.index[bucketIdx]
@@ -337,7 +334,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 					rowLock = c.storageLocks[valueIdx]
 					rowLock.Lock()
 					if (*c.storage)[valueIdx].expiredTime == deletedValueFlag {
-						// trying to delete deleted element in map
+						// trying to deleteItem deleted element in map
 						rowLock.Unlock()
 						continue
 					}
@@ -469,7 +466,7 @@ func (c *Cache) Close() {
 	}
 
 	close(c.stop)
-	atomic.StoreInt32(&c.isStopped, 1)
+	atomic.StoreInt32(c.isStopped, 1)
 
 	go func() {
 		//todo is this best solution?
@@ -490,5 +487,5 @@ func (c *Cache) Close() {
 }
 
 func (c *Cache) isClosed() bool {
-	return atomic.LoadInt32(&c.isStopped) == 1
+	return atomic.LoadInt32(c.isStopped) == 1
 }
