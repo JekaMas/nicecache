@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -40,6 +41,10 @@ type storedValue struct {
 }
 
 type Cache struct {
+	cache *cache
+}
+
+type cache struct {
 	storage      *[cacheSize]storedValue  // Preallocated storage
 	storageLocks [cacheSize]*sync.RWMutex // row level locks
 
@@ -86,22 +91,24 @@ func newNiceCache() *Cache {
 	freeCount := &n
 
 	c := &Cache{
-		storage:         new([cacheSize]storedValue),
-		storageLocks:    storageLocks,
-		index:           index,
-		indexLocks:      indexLocks,
-		freeIndexes:     freeIndexes,
-		freeCount:       freeCount,
-		onClearing:      new(int32),
-		freeIndexCh:     make(chan struct{}, freeBatchSize),
-		startClearingCh: make(chan struct{}, 1),
-		endClearingCh:   make(chan struct{}),
-		stop:            make(chan struct{}),
-		onFlushing:      new(int32),
-		isStopped:       new(int32),
+		&cache{
+			storage:         new([cacheSize]storedValue),
+			storageLocks:    storageLocks,
+			index:           index,
+			indexLocks:      indexLocks,
+			freeIndexes:     freeIndexes,
+			freeCount:       freeCount,
+			onClearing:      new(int32),
+			freeIndexCh:     make(chan struct{}, freeBatchSize),
+			startClearingCh: make(chan struct{}, 1),
+			endClearingCh:   make(chan struct{}),
+			stop:            make(chan struct{}),
+			onFlushing:      new(int32),
+			isStopped:       new(int32),
+		},
 	}
 
-	go c.clearCache(c.startClearingCh)
+	go c.clearCache(c.cache.startClearingCh)
 
 	return c
 }
@@ -113,8 +120,8 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.indexLocks[bucketIdx]
-	indexBucket := c.index[bucketIdx]
+	indexBucketLock := c.cache.indexLocks[bucketIdx]
+	indexBucket := c.cache.index[bucketIdx]
 
 	indexBucketLock.RLock()
 	valueIdx, ok := indexBucket[h]
@@ -128,10 +135,10 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 		indexBucketLock.Unlock()
 	}
 
-	rowLock := c.storageLocks[valueIdx]
+	rowLock := c.cache.storageLocks[valueIdx]
 	rowLock.Lock()
-	(*c.storage)[valueIdx].v = *value
-	(*c.storage)[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
+	(*c.cache.storage)[valueIdx].v = *value
+	(*c.cache.storage)[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
 	rowLock.Unlock()
 
 	return nil
@@ -148,8 +155,8 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.indexLocks[bucketIdx]
-	indexBucket := c.index[bucketIdx]
+	indexBucketLock := c.cache.indexLocks[bucketIdx]
+	indexBucket := c.cache.index[bucketIdx]
 
 	indexBucketLock.RLock()
 	valueIdx, ok := indexBucket[h]
@@ -159,9 +166,9 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 		return NotFoundError
 	}
 
-	rowLock := c.storageLocks[valueIdx]
+	rowLock := c.cache.storageLocks[valueIdx]
 	rowLock.RLock()
-	result := (*c.storage)[valueIdx]
+	result := (*c.cache.storage)[valueIdx]
 	rowLock.RUnlock()
 
 	if result.expiredTime == deletedValueFlag {
@@ -184,8 +191,8 @@ func (c *Cache) Delete(key []byte) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.indexLocks[bucketIdx]
-	indexBucket := c.index[bucketIdx]
+	indexBucketLock := c.cache.indexLocks[bucketIdx]
+	indexBucket := c.cache.index[bucketIdx]
 
 	indexBucketLock.RLock()
 	valueIdx, ok := indexBucket[h]
@@ -195,10 +202,10 @@ func (c *Cache) Delete(key []byte) error {
 	delete(indexBucket, h)
 	indexBucketLock.Unlock()
 
-	rowLock := c.storageLocks[valueIdx]
+	rowLock := c.cache.storageLocks[valueIdx]
 	rowLock.Lock()
-	(*c.storage)[valueIdx] = deletedValue
-	(*c.storage)[valueIdx].expiredTime = deletedValueFlag
+	(*c.cache.storage)[valueIdx] = deletedValue
+	(*c.cache.storage)[valueIdx].expiredTime = deletedValueFlag
 	rowLock.Unlock()
 
 	if !ok {
@@ -212,26 +219,16 @@ func (c *Cache) Delete(key []byte) error {
 // deleteItem item by it bucket hash and index in bucket
 func (c *Cache) deleteItem(h uint64, valueIdx int) {
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.indexLocks[bucketIdx]
-	indexBucket := c.index[bucketIdx]
+	indexBucketLock := c.cache.indexLocks[bucketIdx]
+	indexBucket := c.cache.index[bucketIdx]
 
-	/*
-		indexBucketLock.RLock()
-		valueIdx, ok := indexBucket[h]
-		indexBucketLock.RUnlock()
-		if !ok {
-			return
-		}
-	*/
-
-	//
 	indexBucketLock.Lock()
 	delete(indexBucket, h)
 	indexBucketLock.Unlock()
 
-	rowLock := c.storageLocks[valueIdx]
+	rowLock := c.cache.storageLocks[valueIdx]
 	rowLock.Lock()
-	(*c.storage)[valueIdx] = deletedValue
+	(*c.cache.storage)[valueIdx] = deletedValue
 	rowLock.Unlock()
 
 	c.pushFreeIndex(valueIdx)
@@ -246,41 +243,41 @@ func (c *Cache) popFreeIndex() int {
 		<-endClearingCh
 	}
 
-	if freeIdx > len(c.freeIndexes)-1 || freeIdx < 0 {
+	if freeIdx > len(c.cache.freeIndexes)-1 || freeIdx < 0 {
 		// fixme dont panic
 		panic(freeIdx)
 	}
 
-	return c.freeIndexes[freeIdx]
+	return c.cache.freeIndexes[freeIdx]
 }
 
 func (c *Cache) forceClearCache() chan struct{} {
-	if atomic.CompareAndSwapInt32(c.onClearing, 0, 1) {
+	if atomic.CompareAndSwapInt32(c.cache.onClearing, 0, 1) {
 		// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
-		c.endClearingCh = make(chan struct{})
-		c.startClearingCh <- struct{}{}
+		c.cache.endClearingCh = make(chan struct{})
+		c.cache.startClearingCh <- struct{}{}
 	}
-	return c.endClearingCh
+	return c.cache.endClearingCh
 }
 
 // push back index to mark it as free in cache storage
 func (c *Cache) pushFreeIndex(valueIdx int) {
 	freeIdx := c.addFreeIndex()
 
-	c.freeIndexes[freeIdx] = valueIdx
+	c.cache.freeIndexes[freeIdx] = valueIdx
 }
 
 // increase freeIndexCount and returns new last free index
 func (c *Cache) addFreeIndex() int {
-	return int(atomic.AddInt32(c.freeCount, int32(1))) - 1 //Idx == new freeCount - 1 == old freeCount
+	return int(atomic.AddInt32(c.cache.freeCount, int32(1))) - 1 //Idx == new freeCount - 1 == old freeCount
 }
 
 // decrease freeIndexCount and returns new last free index
-// todo check if i can use atomic.Cond for this
+// todo check if i can use atomic.Cond for messaging all waiting for new free ids goroutines
 func (c *Cache) removeFreeIndex(idx *int) int {
-	*idx = int(atomic.AddInt32(c.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
+	*idx = int(atomic.AddInt32(c.cache.freeCount, int32(-1))) //Idx == new freeCount == old freeCount - 1
 	if *idx < 0 {
-		atomic.AddInt32(c.freeCount, int32(1))
+		atomic.AddInt32(c.cache.freeCount, int32(1))
 		return -1
 	}
 	return *idx
@@ -288,7 +285,7 @@ func (c *Cache) removeFreeIndex(idx *int) int {
 
 // increase freeIndexCount by N and returns new last free index
 func (c *Cache) addNFreeIndex(n int) int {
-	return int(atomic.AddInt32(c.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
+	return int(atomic.AddInt32(c.cache.freeCount, int32(n))) - 1 //Idx == new freeCount - 1 == old freeCount
 }
 
 func (c *Cache) clearCache(startClearingCh chan struct{}) {
@@ -327,26 +324,26 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 			i := 0
 
-			for bucketIdx, bucket := range c.index {
-				indexBucketLock := c.indexLocks[bucketIdx]
+			for bucketIdx, bucket := range c.cache.index {
+				indexBucketLock := c.cache.indexLocks[bucketIdx]
 
 				indexBucketLock.Lock()
 
 				for h, valueIdx := range bucket {
 					delete(bucket, h)
 
-					rowLock = c.storageLocks[valueIdx]
+					rowLock = c.cache.storageLocks[valueIdx]
 					rowLock.Lock()
-					if (*c.storage)[valueIdx].expiredTime == deletedValueFlag {
+					if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlag {
 						// trying to deleteItem deleted element in map
 						rowLock.Unlock()
 						continue
 					}
-					(*c.storage)[valueIdx] = deletedValue
+					(*c.cache.storage)[valueIdx] = deletedValue
 					rowLock.Unlock()
 
 					freeIdx = c.addFreeIndex()
-					c.freeIndexes[freeIdx] = valueIdx
+					c.cache.freeIndexes[freeIdx] = valueIdx
 
 					i++
 					if i >= freeBatchSize {
@@ -370,8 +367,8 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 				freeBatchSize = 1
 			}
 
-			atomic.StoreInt32(c.onClearing, 0)
-			close(c.endClearingCh)
+			atomic.StoreInt32(c.cache.onClearing, 0)
+			close(c.cache.endClearingCh)
 		case nowTime = <-gcTicker.C:
 			// by time garbage collector
 			if c.isClosed() {
@@ -384,12 +381,12 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			currentChunk = circle % len(chunks)
 			currentChunkIndexes = chunks[currentChunk]
 
-			for idx := range (*c.storage)[currentChunkIndexes[0]:currentChunkIndexes[1]] {
+			for idx := range (*c.cache.storage)[currentChunkIndexes[0]:currentChunkIndexes[1]] {
 				indexInCacheArray = idx + currentChunkIndexes[0]
 
-				rowLock = c.storageLocks[indexInCacheArray]
+				rowLock = c.cache.storageLocks[indexInCacheArray]
 				rowLock.RLock()
-				iterateStoredValue = (*c.storage)[indexInCacheArray]
+				iterateStoredValue = (*c.cache.storage)[indexInCacheArray]
 				rowLock.RUnlock()
 
 				if iterateStoredValue.expiredTime == deletedValueFlag {
@@ -398,7 +395,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 				if (iterateStoredValue.expiredTime - now) <= 0 {
 					rowLock.Lock()
-					(*c.storage)[indexInCacheArray] = deletedValue
+					(*c.cache.storage)[indexInCacheArray] = deletedValue
 					rowLock.Unlock()
 
 					freeIndexes = append(freeIndexes, indexInCacheArray)
@@ -408,7 +405,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			if len(freeIndexes) > 0 {
 				maxFreeIdx = c.addNFreeIndex(len(freeIndexes))
 				for _, indexInCacheArray := range freeIndexes {
-					c.freeIndexes[maxFreeIdx] = indexInCacheArray
+					c.cache.freeIndexes[maxFreeIdx] = indexInCacheArray
 					maxFreeIdx--
 				}
 
@@ -420,8 +417,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			}
 
 			circle++
-		//todo сюда стоит поместить выполнение кода Flush, тогда я гарантирую, что он не будет идти одновременно с другими операциями gc
-		case <-c.stop:
+		case <-c.cache.stop:
 			gcTicker.Stop()
 			return
 		}
@@ -437,27 +433,10 @@ func (c *Cache) Flush() error {
 
 	c.Close()
 
-	// todo resolve data race
-	c.storage = newCache.storage
-	c.storageLocks = newCache.storageLocks
-
-	c.index = newCache.index
-	c.indexLocks = newCache.indexLocks
-
-	c.freeIndexesLock = newCache.freeIndexesLock
-	c.freeIndexes = newCache.freeIndexes
-	c.freeCount = newCache.freeCount
-	c.freeIndexCh = newCache.freeIndexCh
-
-	c.onClearing = newCache.onClearing
-	c.startClearingCh = newCache.startClearingCh
-	c.endClearingCh = newCache.endClearingCh
-
-	c.stop = newCache.stop
-	c.onFlushing = newCache.onFlushing
-
-	// should be last
-	c.isStopped = newCache.isStopped
+	// atomic store new cache
+	oldPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.cache))
+	newUnsafe := unsafe.Pointer(newCache.cache)
+	atomic.StorePointer(oldPtr, newUnsafe)
 
 	return nil
 }
@@ -467,7 +446,7 @@ func (c *Cache) Len() int {
 		return 0
 	}
 
-	return cacheSize - int(atomic.LoadInt32(c.freeCount))
+	return cacheSize - int(atomic.LoadInt32(c.cache.freeCount))
 }
 
 func (c *Cache) Close() {
@@ -475,29 +454,10 @@ func (c *Cache) Close() {
 		return
 	}
 
-	close(c.stop)
-	atomic.StoreInt32(c.isStopped, 1)
-
-	/*
-		go func() {
-			//todo is this best solution?
-			time.Sleep(5 * time.Second)
-
-			c.storage = nil
-			c.freeIndexes = nil
-
-			for i := 0; i < cacheSize; i++ {
-				c.storageLocks[i] = nil
-			}
-
-			for i := 0; i < indexBuckets; i++ {
-				c.index[i] = nil
-				c.indexLocks[i] = nil
-			}
-		}()
-	*/
+	close(c.cache.stop)
+	atomic.StoreInt32(c.cache.isStopped, 1)
 }
 
 func (c *Cache) isClosed() bool {
-	return atomic.LoadInt32(c.isStopped) == 1
+	return atomic.LoadInt32(c.cache.isStopped) == 1
 }
