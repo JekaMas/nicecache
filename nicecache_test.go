@@ -619,15 +619,41 @@ func TestCache_Set_One_Repeat(t *testing.T) {
 }
 
 func TestCache_Set_Overflow(t *testing.T) {
+	cache := NewNiceCache()
+	defer cache.Close()
 
-}
+	for i := 0; i < 2*cacheSize; i++ {
+		key := []byte(strconv.Itoa(i))
+		toStore := testValues[0]
 
-func TestCache_Set_Overflow_ManyTimes(t *testing.T) {
+		err := cache.Set(key, &toStore, longTime)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 
-}
+	key := []byte(strconv.Itoa(1))
+	toStore := testValues[0]
 
-func TestCache_Set_Overflow_Flush_ManyTimes(t *testing.T) {
+	err := cache.Set(key, &toStore, longTime)
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	gotValue := TestValue{}
+	err = cache.Get(key, &gotValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := pretty.DiffMessage(gotValue, toStore)
+	if len(diff) != 0 {
+		t.Fatal(diff)
+	}
+
+	if n := cache.Len(); n <= cacheSize {
+		t.Fatal(n)
+	}
 }
 
 func TestCache_Set_Overflow_KeysExpired_Overflow(t *testing.T) {

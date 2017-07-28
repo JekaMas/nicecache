@@ -29,6 +29,7 @@ const (
 var freeBatchSize int = (cacheSize * freeBatchPercent) / 100
 var deletedValue = storedValue{TestValue{}, deletedValueFlag}
 
+// todo move into generator
 func init() {
 	if freeBatchSize < 1 {
 		freeBatchSize = 1
