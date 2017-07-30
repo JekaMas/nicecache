@@ -1,10 +1,16 @@
 #Nicecache
-This is fastest golang cache that i know. Minimum read-write locks, interface{}-free, zero allocation for read and write.
+This is fastest golang cache*
+* statically typed
+* minimum read-write locks
+* interface{}-free
+* zero allocation for read and write
+
 Im really needed you advices and usage experience, please feel free to write me you issues, feature requests and use cases.  
 
 ##Usage
+First of all you need to generate nicecache files.
 You could create cache file in the same package as cached type:
-```
+```go
 //go:generate nicecache -type=TestValue -cacheSize=10000000
 type TestValue struct {
     ...
@@ -12,10 +18,30 @@ type TestValue struct {
 ```
 
 Or create cache file in other package:
-```
+```go
 //go:generate nicecache -type=TestItem -cacheSize=10000000 -cachePackage=nicecache/example/repository
 type TestItem struct {
     ...
+}
+```
+
+```go
+// create and init cache
+cache := NewNiceCacheTestValue()
+defer cache.Close() // close when needed (app exit for example)
+
+key := []byte("product_category_123")  // sync.Pool can be used
+toStore := TestType{...}
+
+err := cache.Set(key, &toStore, longTime)
+if err != nil {
+	//...
+}
+
+gotValue := TestType{} // sync.Pool can be used
+err = cache.Get(key, &gotValue)
+if err != nil {
+	//...
 }
 ```
 
@@ -74,3 +100,8 @@ Benchmark_Cache_Nice_Get_Parallel-8             300000000               51.7 ns/
 Benchmark_Cache_Nice_SetAndGet-8                100000000              155 ns/op               0 B/op          0 allocs/op
 Benchmark_Cache_Nice_SetAndGet_Parallel-8       100000000              143 ns/op               0 B/op          0 allocs/op
 ```
+
+
+
+
+*as i know :)
