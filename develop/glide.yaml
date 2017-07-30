@@ -1,0 +1,3 @@
+package: github.com/JekaMas/nicecache
+import:
+- package: github.com/dgryski/go-farm
