@@ -1,3 +1,6 @@
+package template
+
+var Template = `
 /*
 * CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
 * THIS FILE SHOULD NOT BE EDITED BY HAND
@@ -58,7 +61,7 @@ func (e cacheError{{ .StoredType }}) Error() string { return string(e) }
 
 const (
 	NotFoundError{{ .StoredType }} = cacheError{{ .StoredType }}("key not found")
-	NilValueError{{ .StoredType }} = cacheError{{ .StoredType }}("value pointer shouldn`t be nil")
+	NilValueError{{ .StoredType }} = cacheError{{ .StoredType }}("value pointer shouldnt be nil")
 	CloseError{{ .StoredType }}    = cacheError{{ .StoredType }}("cache has been closed")
 
 	chunksNegativeSliceSize{{ .StoredType }} = cacheError{{ .StoredType }}("sliceLen should be non-negative")
@@ -92,7 +95,13 @@ const (
 )
 
 var {{ .FreeBatchSizeName }} int = ({{ .CacheSizeConstName }} * {{ .FreeBatchPercentName }}) / 100
-var {{ .DeletedValueName }} = {{ .StoredValueType }}{{{ .StoredType }}{}, {{ .DeletedValueFlagName }}}
+var {{ .DeletedValueName }} = {{ .StoredValueType }}{ {{ .StoredType }}{}, {{ .DeletedValueFlagName }} }
+
+func init() {
+	if {{ .FreeBatchSizeName }} < 1 {
+		{{ .FreeBatchSizeName }} = 1
+	}
+}
 
 type {{ .StoredValueType }} struct {
 	v           {{ .StoredType }}
@@ -174,11 +183,11 @@ func newNice{{ .CacheType }}() *{{ .CacheType }} {
 
 func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSeconds int) error {
 	if c.isClosed() {
-		return CloseError
+		return CloseError{{ .StoredType }}
 	}
 
-	h := getHash(key)
-	bucketIdx := getBucketIDs(h)
+	h := getHash{{ .StoredType }}(key)
+	bucketIdx := getBucketIDs{{ .StoredType }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -205,15 +214,15 @@ func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSecon
 
 func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	if c.isClosed() {
-		return CloseError
+		return CloseError{{ .StoredType }}
 	}
 
 	if value == nil {
-		return NilValueError
+		return NilValueError{{ .StoredType }}
 	}
 
-	h := getHash(key)
-	bucketIdx := getBucketIDs(h)
+	h := getHash{{ .StoredType }}(key)
+	bucketIdx := getBucketIDs{{ .StoredType }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -222,7 +231,7 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	indexBucketLock.RUnlock()
 
 	if !ok {
-		return NotFoundError
+		return NotFoundError{{ .StoredType }}
 	}
 
 	rowLock := c.cache.storageLocks[valueIdx]
@@ -231,12 +240,12 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	rowLock.RUnlock()
 
 	if result.expiredTime == {{ .DeletedValueFlagName }} {
-		return NotFoundError
+		return NotFoundError{{ .StoredType }}
 	}
 
 	if (result.expiredTime - int(time.Now().Unix())) <= 0 {
 		c.deleteItem(h, valueIdx)
-		return NotFoundError
+		return NotFoundError{{ .StoredType }}
 	}
 
 	*value = result.v
@@ -245,11 +254,11 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 
 func (c *{{ .CacheType }}) Delete(key []byte) error {
 	if c.isClosed() {
-		return CloseError
+		return CloseError{{ .StoredType }}
 	}
 
-	h := getHash(key)
-	bucketIdx := getBucketIDs(h)
+	h := getHash{{ .StoredType }}(key)
+	bucketIdx := getBucketIDs{{ .StoredType }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -277,7 +286,7 @@ func (c *{{ .CacheType }}) Delete(key []byte) error {
 
 // deleteItem item by it bucket hash and index in bucket
 func (c *{{ .CacheType }}) deleteItem(h uint64, valueIdx int) {
-	bucketIdx := getBucketIDs(h)
+	bucketIdx := getBucketIDs{{ .StoredType }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -307,7 +316,6 @@ func (c *{{ .CacheType }}) popFreeIndex() int {
 
 func (c *{{ .CacheType }}) forceClearCache() chan struct{} {
 	if atomic.CompareAndSwapInt32(c.cache.onClearing, 0, 1) {
-		// Если индексы иссякли и флаг очистки не был выставлен - стартуем очистку
 		c.cache.endClearingCh = make(chan struct{})
 		c.cache.startClearingCh <- struct{}{}
 	}
@@ -364,7 +372,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 	)
 
 	// even for strange {{ .GcChunkSizeName }} chunks func guarantees that all indexes will present in result chunks
-	chunks, _ := chunks({{ .CacheSizeConstName }}, {{ .GcChunkSizeName }})
+	chunks, _ := chunks{{ .StoredType }}({{ .CacheSizeConstName }}, {{ .GcChunkSizeName }})
 
 	for {
 		select {
@@ -479,7 +487,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 
 func (c *{{ .CacheType }}) Flush() error {
 	if c.isClosed() {
-		return CloseError
+		return CloseError{{ .StoredType }}
 	}
 
 	newCache := newNice{{ .CacheType }}()
@@ -514,3 +522,4 @@ func (c *{{ .CacheType }}) Close() {
 func (c *{{ .CacheType }}) isClosed() bool {
 	return atomic.LoadInt32(c.cache.isStopped) == 1
 }
+`

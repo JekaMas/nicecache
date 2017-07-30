@@ -1,15 +1,16 @@
-package nicecache
+package main
 
 import (
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	t "nicecache/template"
 )
 
 /*
@@ -24,7 +25,7 @@ const generatedSuffix = "_nicecache.go"
 func main() {
 	storedType := flag.String("type", "", "Type to cache")
 	cachePackage := flag.String("cachePackage", "", "Package to store generated cache")
-	cacheSize := flag.String("cacheSize", "1000", "Cache size")
+	cacheSize := flag.Int64("cacheSize", 1000, "Cache size")
 
 	flag.Parse()
 
@@ -42,12 +43,11 @@ func main() {
 
 	generator := &Generator{}
 
-	m := metadata(*storedType, *typePointer, pkgDir)
-	if err := generator.Generate(writer, m); err != nil {
+	m := metadata(*storedType, *cachePackage, *cacheSize, pkgDir)
+
+	if err := generator.Generate(writer, t.Template, m); err != nil {
 		panic(err)
 	}
-
-	fmt.Printf("Generated %s %s\n", *format, outputFile)
 }
 
 type Metadata struct {
@@ -56,7 +56,7 @@ type Metadata struct {
 	StoredType        string
 
 	IndexBuckets int
-	CacheSize    int
+	CacheSize    int64
 
 	CacheSizeConstName string
 	IndexBucketsName   string
@@ -79,39 +79,60 @@ type Metadata struct {
 	InnerCacheType  string
 }
 
-func metadata(typeName string, pointerType bool, packageDir string) (m Metadata) {
-	m.Object = "obj"
-	m.Type = typeName
+func metadata(storedType string, cachePackage string, cacheSize int64, packageDir string) (m Metadata) {
+	withSuffix := withTypeSuffix(storedType)
+
+	m.StoredType = storedType
+	m.CacheType = "Cache" + storedType
+	m.InnerCacheType = "innerCache" + storedType
 	m.PackageName = filepath.Base(packageDir)
 
-	if pointerType {
-		m.MarshalObject = m.Object
-	} else {
-		m.MarshalObject = fmt.Sprintf("&%s", m.Object)
-	}
+	m.CacheSize = cacheSize
+	m.CacheSizeConstName = withSuffix("cacheSize")
 
+	m.IndexBuckets = 100
+	m.IndexBucketsName = withSuffix("indexBuckets")
+
+	m.StoredValueType = withSuffix("storedValue")
+
+	m.FreeBatchPercentName  = withSuffix("freeBatchPercent")
+	m.AlphaName = withSuffix("alpha")
+	m.MaxFreeRatePercentName = withSuffix("maxFreeRatePercent")
+
+	m.GcTimeName  = withSuffix("gcTime")
+	m.GcChunkPercentName  = withSuffix("gcChunkPercent")
+	m.GcChunkSizeName  = withSuffix("gcChunkSize")
+
+	m.DeletedValueFlagName  = withSuffix("deletedValueFlag")
+
+	m.FreeBatchSizeName  = withSuffix("freeBatchSize")
+	m.DeletedValueName  = withSuffix("deletedValue")
+
+	// todo add import of Stored type package
 	return m
+}
+
+func withTypeSuffix(suffix string) func(string) string {
+	return func(s string) string {
+		return s + suffix
+	}
 }
 
 type Generator struct{}
 
-func (g *Generator) Generate(writer io.WriteCloser, templ io.Reader, metadata Metadata) error {
+func (g *Generator) Generate(writer io.WriteCloser, templ string, metadata Metadata) error {
 	tmpl, err := g.template(templ)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	return tmpl.Execute(writer, metadata)
 }
 
-func (g *Generator) template(templ io.Reader) (*template.Template, error) {
-	res, err := ioutil.ReadAll(templ)
-	if err != nil {
-		return nil, err
-	}
-
+func (g *Generator) template(templ string) (*template.Template, error) {
 	tmpl := template.New("nicecache")
-	return tmpl.Parse(string(res))
+
+	return tmpl.Parse(templ)
 }
 
 func formatFileName(typeName string) string {

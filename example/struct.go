@@ -1,6 +1,6 @@
-package nicecache
+package example
 
-//go:generate nicecache cacheSize = 10000000
+//go:generate nicecache -cacheSize=10000000 -type=TestValue
 type TestValue struct {
 	ID           string
 	N            uint32
