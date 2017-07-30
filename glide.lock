@@ -3,4 +3,6 @@ updated: 2017-07-15T14:34:50.569962575+03:00
 imports:
 - name: github.com/dgryski/go-farm
   version: e2d0fe22b456fa0a35cd883ba355ecfcf1881490
+- name: github.com/JekaMas/pretty
+  version: bfc6f9ec9574d3596a75cec8fe110a659dcb6458
 testImports: []
