@@ -1,3 +1,28 @@
+#Nicecache
+This is fastest golang cache that i know. Minimum read-write locks, interface{}-free, zero allocation for read and write.
+Im really needed you advices and usage experience, please feel free to write me you issues, feature requests and use cases.  
+
+##Usage
+You could create cache file in the same package as cached type:
+```
+//go:generate nicecache -type=TestValue -cacheSize=10000000
+type TestValue struct {
+    ...
+}
+```
+
+Or create cache file in other package:
+```
+//go:generate nicecache -type=TestItem -cacheSize=10000000 -cachePackage=nicecache/example/repository
+type TestItem struct {
+    ...
+}
+```
+
+##Example
+Example [is here.](example)
+
+##Benchmarks
 Cache size 1.000.000 items, performance on 4 GOMAXPROCS:
 ```
 Benchmark_Cache_Nice_Set-4                      100000000              132 ns/op               0 B/op          0 allocs/op

@@ -1,4 +1,4 @@
-package nicecache
+package example
 
 import (
 	"strconv"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestCache_Get_OneKeyExists(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -33,7 +33,7 @@ func TestCache_Get_OneKeyExists(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_NotExists(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -47,13 +47,13 @@ func TestCache_Get_OneKey_NotExists(t *testing.T) {
 	gotValue := TestValue{}
 	key = []byte(strconv.Itoa(2))
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 }
 
 func TestCache_Get_OneKey_NilValue(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -65,13 +65,13 @@ func TestCache_Get_OneKey_NilValue(t *testing.T) {
 	}
 
 	err = cache.Get(key, nil)
-	if err != NilValueError {
+	if err != NilValueErrorTestValue {
 		t.Fatal(err)
 	}
 }
 
 func TestCache_Get_OneKey_Repeat(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -107,7 +107,7 @@ func TestCache_Get_OneKey_Repeat(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -138,7 +138,7 @@ func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
 
 	gotValue = TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestCache_Get_OneKey_TTL_ClearOnRead(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -179,7 +179,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
 
 	gotValue = TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -189,7 +189,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC(t *testing.T) {
 }
 
 func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -245,7 +245,7 @@ func TestCache_Get_OneKey_TTL_ClearByGC_OneKeyLive(t *testing.T) {
 	// expired key
 	gotValue = TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -282,18 +282,18 @@ func TestCache_Get_Set_LongTime_CheckMemoryLeak(t *testing.T) {
 }
 
 func TestCache_Get_Close(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	cache.Close()
 
 	gotValue := TestValue{}
 	err := cache.Get([]byte{1}, &gotValue)
-	if err != CloseError {
+	if err != CloseErrorTestValue {
 		t.Fatal(err)
 	}
 }
 
 func TestCache_Flush(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -311,7 +311,7 @@ func TestCache_Flush(t *testing.T) {
 
 	gotValue := TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -321,17 +321,17 @@ func TestCache_Flush(t *testing.T) {
 }
 
 func TestCache_Flush_Close(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	cache.Close()
 
 	err := cache.Flush()
-	if err != CloseError {
+	if err != CloseErrorTestValue {
 		t.Fatal(err)
 	}
 }
 
 func TestCache_Flush_Repeat(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -349,7 +349,7 @@ func TestCache_Flush_Repeat(t *testing.T) {
 
 	gotValue := TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -364,7 +364,7 @@ func TestCache_Flush_Repeat(t *testing.T) {
 	}
 
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -374,7 +374,7 @@ func TestCache_Flush_Repeat(t *testing.T) {
 }
 
 func TestCache_Delete(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -392,7 +392,7 @@ func TestCache_Delete(t *testing.T) {
 
 	gotValue := TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -402,17 +402,17 @@ func TestCache_Delete(t *testing.T) {
 }
 
 func TestCache_Delete_Close(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	cache.Close()
 
 	err := cache.Delete([]byte{1})
-	if err != CloseError {
+	if err != CloseErrorTestValue {
 		t.Fatal(err)
 	}
 }
 
 func TestCache_Delete_Repeat(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -430,7 +430,7 @@ func TestCache_Delete_Repeat(t *testing.T) {
 
 	gotValue := TestValue{}
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -445,7 +445,7 @@ func TestCache_Delete_Repeat(t *testing.T) {
 	}
 
 	err = cache.Get(key, &gotValue)
-	if err != NotFoundError {
+	if err != NotFoundErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -455,7 +455,7 @@ func TestCache_Delete_Repeat(t *testing.T) {
 }
 
 func TestCache_Len_Zero(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	if n := cache.Len(); n != 0 {
@@ -464,7 +464,7 @@ func TestCache_Len_Zero(t *testing.T) {
 }
 
 func TestCache_Len_One(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -481,7 +481,7 @@ func TestCache_Len_One(t *testing.T) {
 }
 
 func TestCache_Len_Close(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 
 	key := []byte(strconv.Itoa(1))
 	toStore := testValues[0]
@@ -503,7 +503,7 @@ func TestCache_Len_Close(t *testing.T) {
 }
 
 func TestCache_Len_Many(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	for i := 0; i < 2; i++ {
@@ -522,7 +522,7 @@ func TestCache_Len_Many(t *testing.T) {
 }
 
 func TestCache_Close(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 
 	key := []byte(strconv.Itoa(1))
 	toStore := testValues[0]
@@ -535,7 +535,7 @@ func TestCache_Close(t *testing.T) {
 	cache.Close()
 
 	err = cache.Set(key, &toStore, longTime)
-	if err != CloseError {
+	if err != CloseErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -545,7 +545,7 @@ func TestCache_Close(t *testing.T) {
 }
 
 func TestCache_Close_Repeat(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 
 	key := []byte(strconv.Itoa(1))
 	toStore := testValues[0]
@@ -559,7 +559,7 @@ func TestCache_Close_Repeat(t *testing.T) {
 	cache.Close()
 
 	err = cache.Set(key, &toStore, longTime)
-	if err != CloseError {
+	if err != CloseErrorTestValue {
 		t.Fatal(err)
 	}
 
@@ -569,7 +569,7 @@ func TestCache_Close_Repeat(t *testing.T) {
 }
 
 func TestCache_Set_One_Repeat(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
 	key := []byte(strconv.Itoa(1))
@@ -619,10 +619,10 @@ func TestCache_Set_One_Repeat(t *testing.T) {
 }
 
 func TestCache_Set_Overflow(t *testing.T) {
-	cache := NewNiceCache()
+	cache := NewNiceCacheTestValue()
 	defer cache.Close()
 
-	for i := 0; i < 2*cacheSize; i++ {
+	for i := 0; i < 2*cacheSizeTestValue; i++ {
 		key := []byte(strconv.Itoa(i))
 		toStore := testValues[0]
 
@@ -651,11 +651,11 @@ func TestCache_Set_Overflow(t *testing.T) {
 		t.Fatal(diff)
 	}
 
-	if n := cache.Len(); n <= int(cacheSize*(1 - float64(freeBatchSize+1)/float64(100))) {
+	if n := cache.Len(); n <= int(cacheSizeTestValue*(1 - float64(freeBatchSizeTestValue+1)/float64(100))) {
 		t.Fatal(n)
 	}
 
-	if n := cache.Len(); n > cacheSize {
+	if n := cache.Len(); n > cacheSizeTestValue {
 		t.Fatal(n)
 	}
 }

@@ -13,13 +13,6 @@ import (
 	t "nicecache/template"
 )
 
-/*
-1. взять текущее имя пакета или переданное в dest
-2. взять имя текущее имя пакета
-3. взять имя текущего типа
-4. взять размер кэша
-*/
-
 const generatedSuffix = "_nicecache.go"
 
 func main() {
@@ -35,7 +28,9 @@ func main() {
 	}
 
 	outputFile := formatFileName(*storedType)
-	writer, err := os.Create(filepath.Join(pkgDir, outputFile))
+
+	cacheFilePath := filepath.Join(pkgDir, outputFile)
+	writer, err := os.Create(cacheFilePath)
 	if err != nil {
 		panic(err)
 	}
@@ -95,20 +90,25 @@ func metadata(storedType string, cachePackage string, cacheSize int64, packageDi
 
 	m.StoredValueType = withSuffix("storedValue")
 
-	m.FreeBatchPercentName  = withSuffix("freeBatchPercent")
+	m.FreeBatchPercentName = withSuffix("freeBatchPercent")
 	m.AlphaName = withSuffix("alpha")
 	m.MaxFreeRatePercentName = withSuffix("maxFreeRatePercent")
 
-	m.GcTimeName  = withSuffix("gcTime")
-	m.GcChunkPercentName  = withSuffix("gcChunkPercent")
-	m.GcChunkSizeName  = withSuffix("gcChunkSize")
+	m.GcTimeName = withSuffix("gcTime")
+	m.GcChunkPercentName = withSuffix("gcChunkPercent")
+	m.GcChunkSizeName = withSuffix("gcChunkSize")
 
-	m.DeletedValueFlagName  = withSuffix("deletedValueFlag")
+	m.DeletedValueFlagName = withSuffix("deletedValueFlag")
 
-	m.FreeBatchSizeName  = withSuffix("freeBatchSize")
-	m.DeletedValueName  = withSuffix("deletedValue")
+	m.FreeBatchSizeName = withSuffix("freeBatchSize")
+	m.DeletedValueName = withSuffix("deletedValue")
 
-	// todo add import of Stored type package
+	if cachePackage != "" {
+		p, _ := os.Getwd()
+		goPath := os.Getenv("GOPATH") + "/src/"
+		m.StoredTypePackage = fmt.Sprintf(". \"%s\"", strings.TrimPrefix(p, goPath))
+	}
+
 	return m
 }
 

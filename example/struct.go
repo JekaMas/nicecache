@@ -21,6 +21,7 @@ type TestValue struct {
 	Items        []TestItem
 }
 
+//go:generate nicecache -type=TestItem -cacheSize=10000000 -cachePackage=nicecache/example/repository
 type TestItem struct {
 	ID           string
 	N            uint32
