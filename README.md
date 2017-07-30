@@ -6,7 +6,9 @@ This is fastest golang cache*
 * interface{}-free
 * zero allocation for read and write
 
-Im really needed you advices and usage experience, please feel free to write me you issues, feature requests and use cases.  
+
+#### Note
+Im really need you advices and usage experience, please feel free to write me you issues, feature requests and use cases.
 
 
 ## Usage
