@@ -1,4 +1,5 @@
-#Nicecache
+# Nicecache
+
 This is fastest golang cache*
 * statically typed
 * minimum read-write locks
@@ -7,7 +8,9 @@ This is fastest golang cache*
 
 Im really needed you advices and usage experience, please feel free to write me you issues, feature requests and use cases.  
 
-##Usage
+
+## Usage
+
 First of all you need to generate nicecache files.
 You could create cache file in the same package as cached type:
 ```go
@@ -45,10 +48,14 @@ if err != nil {
 }
 ```
 
-##Example
+
+## Example
+
 Example [is here.](example)
 
-##Benchmarks
+
+## Benchmarks
+
 Cache size 1.000.000 items, performance on 4 GOMAXPROCS:
 ```
 Benchmark_Cache_Nice_Set-4                      100000000              132 ns/op               0 B/op          0 allocs/op
@@ -102,6 +109,5 @@ Benchmark_Cache_Nice_SetAndGet_Parallel-8       100000000              143 ns/op
 ```
 
 
-
-
-*as i know :)
+###### Remarks:
+*as far as i know :)
