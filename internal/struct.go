@@ -1,5 +1,6 @@
-package nicecache
+package internal
 
+//TestValue some test type
 type TestValue struct {
 	ID           string
 	N            uint32
@@ -20,6 +21,7 @@ type TestValue struct {
 	Items        []TestItem
 }
 
+//TestItem some test type to test cache in different package
 type TestItem struct {
 	ID           string
 	N            uint32

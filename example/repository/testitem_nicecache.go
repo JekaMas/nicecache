@@ -1,18 +1,18 @@
 /*
 * CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
 * THIS FILE SHOULD NOT BE EDITED BY HAND
-*/
+ */
 
 package repository
 
 import (
-    "sync"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/dgryski/go-farm"
 	. "github.com/JekaMas/nicecache/example"
+	"github.com/dgryski/go-farm"
 )
 
 /* ___________ bucket_hash ___________ */
@@ -56,12 +56,15 @@ type cacheErrorTestItem string
 func (e cacheErrorTestItem) Error() string { return string(e) }
 
 const (
+	//NotFoundErrorTestItem not found error
 	NotFoundErrorTestItem = cacheErrorTestItem("key not found")
+	//NilValueErrorTestItem nil pointer given
 	NilValueErrorTestItem = cacheErrorTestItem("value pointer shouldnt be nil")
-	CloseErrorTestItem    = cacheErrorTestItem("cache has been closed")
+	//CloseErrorTestItem cache is closed
+	CloseErrorTestItem = cacheErrorTestItem("cache has been closed")
 
 	chunksNegativeSliceSizeTestItem = cacheErrorTestItem("sliceLen should be non-negative")
-	chunksNegativeSizeTestItem = cacheErrorTestItem("chunkSize should be positive")
+	chunksNegativeSizeTestItem      = cacheErrorTestItem("chunkSize should be positive")
 )
 
 /* ___________ key_hash ___________ */
@@ -83,15 +86,15 @@ const (
 
 	// normal gc
 	// GC full circle takes time = gcTimeTestItem*(cacheSizeTestItem/gcChunkSizeTestItem)
-	gcTimeTestItem         = 1 * time.Second                  // how often gc runs
-	gcChunkPercentTestItem = 1                                // percent of items to proceed in gc step
+	gcTimeTestItem         = 1 * time.Second                                  // how often gc runs
+	gcChunkPercentTestItem = 1                                                // percent of items to proceed in gc step
 	gcChunkSizeTestItem    = cacheSizeTestItem * gcChunkPercentTestItem / 100 // number of items to proceed in gc step
 
 	deletedValueFlagTestItem = 0
 )
 
 var freeBatchSizeTestItem int = (cacheSizeTestItem * freeBatchPercentTestItem) / 100
-var deletedValueTestItem = storedValueTestItem{ TestItem{}, deletedValueFlagTestItem }
+var deletedValueTestItem = storedValueTestItem{TestItem{}, deletedValueFlagTestItem}
 
 func init() {
 	if freeBatchSizeTestItem < 1 {
@@ -104,13 +107,14 @@ type storedValueTestItem struct {
 	expiredTime int
 }
 
+//CacheTestItem typed cache
 type CacheTestItem struct {
 	cache *innerCacheTestItem
 }
 
 type innerCacheTestItem struct {
-	storage      *[cacheSizeTestItem]storedValueTestItem  // Preallocated storage
-	storageLocks [cacheSizeTestItem]*sync.RWMutex // row level locks
+	storage      *[cacheSizeTestItem]storedValueTestItem // Preallocated storage
+	storageLocks [cacheSizeTestItem]*sync.RWMutex        // row level locks
 
 	index      [indexBucketsTestItem]map[uint64]int // map[hashedKey]valueIndexInArray
 	indexLocks [indexBucketsTestItem]*sync.RWMutex  // few maps for less locks
@@ -129,6 +133,7 @@ type innerCacheTestItem struct {
 	onFlushing *int32
 }
 
+//NewNiceCacheTestItem typed cache constructor
 func NewNiceCacheTestItem() *CacheTestItem {
 	return newNiceCacheTestItem()
 }
@@ -177,6 +182,7 @@ func newNiceCacheTestItem() *CacheTestItem {
 	return c
 }
 
+//Set value by key
 func (c *CacheTestItem) Set(key []byte, value *TestItem, expireSeconds int) error {
 	if c.isClosed() {
 		return CloseErrorTestItem
@@ -208,6 +214,7 @@ func (c *CacheTestItem) Set(key []byte, value *TestItem, expireSeconds int) erro
 	return nil
 }
 
+//Get value by key
 func (c *CacheTestItem) Get(key []byte, value *TestItem) error {
 	if c.isClosed() {
 		return CloseErrorTestItem
@@ -248,6 +255,7 @@ func (c *CacheTestItem) Get(key []byte, value *TestItem) error {
 	return nil
 }
 
+//Delete value by key
 func (c *CacheTestItem) Delete(key []byte) error {
 	if c.isClosed() {
 		return CloseErrorTestItem
@@ -481,14 +489,15 @@ func (c *CacheTestItem) clearCache(startClearingCh chan struct{}) {
 	}
 }
 
+//Flush cache. Can take a time
 func (c *CacheTestItem) Flush() error {
 	if c.isClosed() {
 		return CloseErrorTestItem
 	}
 
-	newCache := newNiceCacheTestItem()
-
 	c.Close()
+
+	newCache := newNiceCacheTestItem()
 
 	// atomic store new cache
 	oldPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.cache))
@@ -498,6 +507,7 @@ func (c *CacheTestItem) Flush() error {
 	return nil
 }
 
+//Len get stored elements count
 func (c *CacheTestItem) Len() int {
 	if c.isClosed() {
 		return 0
@@ -506,6 +516,7 @@ func (c *CacheTestItem) Len() int {
 	return cacheSizeTestItem - int(atomic.LoadInt32(c.cache.freeCount))
 }
 
+//Close cache
 func (c *CacheTestItem) Close() {
 	if c.isClosed() {
 		return

@@ -1,4 +1,4 @@
-package nicecache
+package internal
 
 import (
 	"reflect"

@@ -1,4 +1,4 @@
-package nicecache
+package internal
 
 // chunks returns equals chunks
 func chunks(sliceLen, chunkSize int) ([][2]int, error) {

@@ -1,4 +1,4 @@
-package nicecache
+package internal
 
 import (
 	"github.com/dgryski/go-farm"

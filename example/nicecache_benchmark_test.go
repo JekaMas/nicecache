@@ -53,7 +53,7 @@ func Benchmark_Cache_Nice_Set_Parallel(b *testing.B) {
 	}
 	toStore := testValues[0]
 
-	var i int32 = 0
+	var i int32
 	var err error
 
 	b.ResetTimer()
@@ -124,7 +124,7 @@ func Benchmark_Cache_Nice_Get_Parallel(b *testing.B) {
 		}
 	}
 
-	var i int32 = 0
+	var i int32
 	var err error
 
 	b.ResetTimer()
@@ -183,7 +183,7 @@ func Benchmark_Cache_Nice_SetAndGet_Parallel(b *testing.B) {
 	toStore := testValues[0]
 	cache.Set(keys[0], &toStore, longTime)
 
-	var i int32 = 0
+	var i int32
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

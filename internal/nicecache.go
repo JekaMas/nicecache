@@ -1,4 +1,4 @@
-package nicecache
+package internal
 
 import (
 	"sync"
@@ -41,6 +41,7 @@ type storedValue struct {
 	expiredTime int
 }
 
+//Cache typed cache
 type Cache struct {
 	cache *cache
 }
@@ -66,6 +67,7 @@ type cache struct {
 	onFlushing *int32
 }
 
+//NewNiceCache typed cache constructor
 func NewNiceCache() *Cache {
 	return newNiceCache()
 }
@@ -114,6 +116,7 @@ func newNiceCache() *Cache {
 	return c
 }
 
+//Set value by key
 func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	if c.isClosed() {
 		return CloseError
@@ -145,6 +148,7 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 	return nil
 }
 
+//Get value by key
 func (c *Cache) Get(key []byte, value *TestValue) error {
 	if c.isClosed() {
 		return CloseError
@@ -185,6 +189,7 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 	return nil
 }
 
+//Delete value by key
 func (c *Cache) Delete(key []byte) error {
 	if c.isClosed() {
 		return CloseError
@@ -425,14 +430,15 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 	}
 }
 
+//Flush cache. Can take a time
 func (c *Cache) Flush() error {
 	if c.isClosed() {
 		return CloseError
 	}
 
-	newCache := newNiceCache()
-
 	c.Close()
+
+	newCache := newNiceCache()
 
 	// atomic store new cache
 	oldPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.cache))
@@ -442,6 +448,7 @@ func (c *Cache) Flush() error {
 	return nil
 }
 
+//Len get stored elements count
 func (c *Cache) Len() int {
 	if c.isClosed() {
 		return 0
@@ -450,6 +457,7 @@ func (c *Cache) Len() int {
 	return cacheSize - int(atomic.LoadInt32(c.cache.freeCount))
 }
 
+//Close cache
 func (c *Cache) Close() {
 	if c.isClosed() {
 		return

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
-	"path"
-	"runtime"
 
 	t "github.com/JekaMas/nicecache/template"
 )

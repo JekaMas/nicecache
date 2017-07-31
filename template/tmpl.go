@@ -58,8 +58,11 @@ type cacheError{{ .StoredType }} string
 func (e cacheError{{ .StoredType }}) Error() string { return string(e) }
 
 const (
+	//NotFoundError{{ .StoredType }} not found error
 	NotFoundError{{ .StoredType }} = cacheError{{ .StoredType }}("key not found")
+	//NilValueError{{ .StoredType }} nil pointer given
 	NilValueError{{ .StoredType }} = cacheError{{ .StoredType }}("value pointer shouldnt be nil")
+	//CloseError{{ .StoredType }} cache is closed
 	CloseError{{ .StoredType }}    = cacheError{{ .StoredType }}("cache has been closed")
 
 	chunksNegativeSliceSize{{ .StoredType }} = cacheError{{ .StoredType }}("sliceLen should be non-negative")
@@ -106,6 +109,7 @@ type {{ .StoredValueType }} struct {
 	expiredTime int
 }
 
+//{{ .CacheType }} typed cache
 type {{ .CacheType }} struct {
 	cache *{{ .InnerCacheType }}
 }
@@ -131,6 +135,7 @@ type {{ .InnerCacheType }} struct {
 	onFlushing *int32
 }
 
+//NewNice{{ .CacheType }} typed cache constructor
 func NewNice{{ .CacheType }}() *{{ .CacheType }} {
 	return newNice{{ .CacheType }}()
 }
@@ -179,6 +184,7 @@ func newNice{{ .CacheType }}() *{{ .CacheType }} {
 	return c
 }
 
+//Set value by key
 func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSeconds int) error {
 	if c.isClosed() {
 		return CloseError{{ .StoredType }}
@@ -210,6 +216,7 @@ func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSecon
 	return nil
 }
 
+//Get value by key
 func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	if c.isClosed() {
 		return CloseError{{ .StoredType }}
@@ -250,6 +257,7 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	return nil
 }
 
+//Delete value by key
 func (c *{{ .CacheType }}) Delete(key []byte) error {
 	if c.isClosed() {
 		return CloseError{{ .StoredType }}
@@ -483,14 +491,15 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 	}
 }
 
+//Flush cache. Can take a time
 func (c *{{ .CacheType }}) Flush() error {
 	if c.isClosed() {
 		return CloseError{{ .StoredType }}
 	}
 
-	newCache := newNice{{ .CacheType }}()
-
 	c.Close()
+
+	newCache := newNice{{ .CacheType }}()
 
 	// atomic store new cache
 	oldPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.cache))
@@ -500,6 +509,7 @@ func (c *{{ .CacheType }}) Flush() error {
 	return nil
 }
 
+//Len get stored elements count
 func (c *{{ .CacheType }}) Len() int {
 	if c.isClosed() {
 		return 0
@@ -508,6 +518,7 @@ func (c *{{ .CacheType }}) Len() int {
 	return {{ .CacheSizeConstName }} - int(atomic.LoadInt32(c.cache.freeCount))
 }
 
+//Close cache
 func (c *{{ .CacheType }}) Close() {
 	if c.isClosed() {
 		return
