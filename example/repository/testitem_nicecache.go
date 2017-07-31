@@ -387,50 +387,11 @@ func (c *CacheTestItem) clearCache(startClearingCh chan struct{}) {
 				return
 			}
 
-			i := 0
-
-			for bucketIdx, bucket := range c.cache.index {
-				indexBucketLock := c.cache.indexLocks[bucketIdx]
-
-				indexBucketLock.Lock()
-
-				for h, valueIdx := range bucket {
-					delete(bucket, h)
-
-					rowLock = c.cache.storageLocks[valueIdx]
-					rowLock.Lock()
-					if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlagTestItem {
-						// trying to deleteItem deleted element in map
-						rowLock.Unlock()
-						continue
-					}
-					(*c.cache.storage)[valueIdx] = deletedValueTestItem
-					rowLock.Unlock()
-
-					freeIdx = c.addFreeIndex()
-					c.cache.freeIndexes[freeIdx] = valueIdx
-
-					i++
-					if i >= freeBatchSizeTestItem {
-						break
-					}
-				}
-				indexBucketLock.Unlock()
-			}
+			//randomly free indexes
+			c.forceGCMainCircle(rowLock, freeIdx)
 
 			// Increase freeBatchSizeTestItem progressive
-			var freeBatchSizeDelta int = freeBatchSizeTestItem * alphaTestItem / 100
-			if freeBatchSizeDelta < 1 {
-				freeBatchSizeDelta = 1
-			}
-
-			freeBatchSizeTestItem += freeBatchSizeDelta
-			if freeBatchSizeTestItem > (cacheSizeTestItem*maxFreeRatePercentTestItem)/100 {
-				freeBatchSizeTestItem = (cacheSizeTestItem * maxFreeRatePercentTestItem) / 100
-			}
-			if freeBatchSizeTestItem < 1 {
-				freeBatchSizeTestItem = 1
-			}
+			c.setNewFreeBatchSize()
 
 			atomic.StoreInt32(c.cache.onClearing, 0)
 			close(c.cache.endClearingCh)
@@ -486,6 +447,55 @@ func (c *CacheTestItem) clearCache(startClearingCh chan struct{}) {
 			gcTicker.Stop()
 			return
 		}
+	}
+}
+
+func (*CacheTestItem) setNewFreeBatchSize() {
+	var freeBatchSizeDelta int = freeBatchSizeTestItem * alphaTestItem / 100
+	if freeBatchSizeDelta < 1 {
+		freeBatchSizeDelta = 1
+	}
+
+	freeBatchSizeTestItem += freeBatchSizeDelta
+	if freeBatchSizeTestItem > (cacheSizeTestItem*maxFreeRatePercentTestItem)/100 {
+		freeBatchSizeTestItem = (cacheSizeTestItem * maxFreeRatePercentTestItem) / 100
+	}
+
+	if freeBatchSizeTestItem < 1 {
+		freeBatchSizeTestItem = 1
+	}
+}
+
+func (c *CacheTestItem) forceGCMainCircle(rowLock *sync.RWMutex, freeIdx int) {
+	i := 0
+
+	for bucketIdx, bucket := range c.cache.index {
+		indexBucketLock := c.cache.indexLocks[bucketIdx]
+
+		indexBucketLock.Lock()
+
+		for h, valueIdx := range bucket {
+			delete(bucket, h)
+
+			rowLock = c.cache.storageLocks[valueIdx]
+			rowLock.Lock()
+			if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlagTestItem {
+				// trying to deleteItem deleted element in map
+				rowLock.Unlock()
+				continue
+			}
+			(*c.cache.storage)[valueIdx] = deletedValueTestItem
+			rowLock.Unlock()
+
+			freeIdx = c.addFreeIndex()
+			c.cache.freeIndexes[freeIdx] = valueIdx
+
+			i++
+			if i >= freeBatchSizeTestItem {
+				break
+			}
+		}
+		indexBucketLock.Unlock()
 	}
 }
 

@@ -328,50 +328,11 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 				return
 			}
 
-			i := 0
-
-			for bucketIdx, bucket := range c.cache.index {
-				indexBucketLock := c.cache.indexLocks[bucketIdx]
-
-				indexBucketLock.Lock()
-
-				for h, valueIdx := range bucket {
-					delete(bucket, h)
-
-					rowLock = c.cache.storageLocks[valueIdx]
-					rowLock.Lock()
-					if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlag {
-						// trying to deleteItem deleted element in map
-						rowLock.Unlock()
-						continue
-					}
-					(*c.cache.storage)[valueIdx] = deletedValue
-					rowLock.Unlock()
-
-					freeIdx = c.addFreeIndex()
-					c.cache.freeIndexes[freeIdx] = valueIdx
-
-					i++
-					if i >= freeBatchSize {
-						break
-					}
-				}
-				indexBucketLock.Unlock()
-			}
+			//randomly free indexes
+			c.forceGCMainCircle(rowLock, freeIdx)
 
 			// Increase freeBatchSize progressive
-			var freeBatchSizeDelta int = freeBatchSize * alpha / 100
-			if freeBatchSizeDelta < 1 {
-				freeBatchSizeDelta = 1
-			}
-
-			freeBatchSize += freeBatchSizeDelta
-			if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
-				freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
-			}
-			if freeBatchSize < 1 {
-				freeBatchSize = 1
-			}
+			c.setNewFreeBatchSize()
 
 			atomic.StoreInt32(c.cache.onClearing, 0)
 			close(c.cache.endClearingCh)
@@ -427,6 +388,55 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			gcTicker.Stop()
 			return
 		}
+	}
+}
+
+func (*Cache) setNewFreeBatchSize() {
+	var freeBatchSizeDelta int = freeBatchSize * alpha / 100
+	if freeBatchSizeDelta < 1 {
+		freeBatchSizeDelta = 1
+	}
+
+	freeBatchSize += freeBatchSizeDelta
+	if freeBatchSize > (cacheSize*maxFreeRatePercent)/100 {
+		freeBatchSize = (cacheSize * maxFreeRatePercent) / 100
+	}
+
+	if freeBatchSize < 1 {
+		freeBatchSize = 1
+	}
+}
+
+func (c *Cache) forceGCMainCircle(rowLock *sync.RWMutex, freeIdx int) {
+	i := 0
+
+	for bucketIdx, bucket := range c.cache.index {
+		indexBucketLock := c.cache.indexLocks[bucketIdx]
+
+		indexBucketLock.Lock()
+
+		for h, valueIdx := range bucket {
+			delete(bucket, h)
+
+			rowLock = c.cache.storageLocks[valueIdx]
+			rowLock.Lock()
+			if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlag {
+				// trying to deleteItem deleted element in map
+				rowLock.Unlock()
+				continue
+			}
+			(*c.cache.storage)[valueIdx] = deletedValue
+			rowLock.Unlock()
+
+			freeIdx = c.addFreeIndex()
+			c.cache.freeIndexes[freeIdx] = valueIdx
+
+			i++
+			if i >= freeBatchSize {
+				break
+			}
+		}
+		indexBucketLock.Unlock()
 	}
 }
 
