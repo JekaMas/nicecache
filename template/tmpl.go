@@ -519,5 +519,4 @@ func (c *{{ .CacheType }}) Close() {
 
 func (c *{{ .CacheType }}) isClosed() bool {
 	return atomic.LoadInt32(c.cache.isStopped) == 1
-}
-`
+}`

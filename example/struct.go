@@ -1,5 +1,6 @@
 package example
 
+//TestValue some test type
 //go:generate nicecache -cacheSize=10000000 -type=TestValue
 type TestValue struct {
 	ID           string
@@ -21,6 +22,7 @@ type TestValue struct {
 	Items        []TestItem
 }
 
+//TestItem some test type to test cache in different package
 //go:generate nicecache -type=TestItem -cacheSize=10000000 -cachePackage=nicecache/example/repository
 type TestItem struct {
 	ID           string
