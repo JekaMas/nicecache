@@ -1,3 +1,4 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/jekamas/nicecache)](https://goreportcard.com/report/github.com/jekamas/nicecache)
 # Nicecache
 
 This is fastest golang cache*
