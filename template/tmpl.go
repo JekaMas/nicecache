@@ -19,22 +19,22 @@ import (
 
 /* ___________ bucket_hash ___________ */
 
-func getBucketIDs{{ .StoredType }}(h uint64) int {
+func getBucketIDs{{ .StoredTypeSuffix }}(h uint64) int {
 	return int(h % {{ .IndexBuckets }})
 }
 
 /* ___________ chunks ___________ */
 
 // chunks returns equals chunks
-func chunks{{ .StoredType }}(sliceLen, chunkSize int) ([][2]int, error) {
+func chunks{{ .StoredTypeSuffix }}(sliceLen, chunkSize int) ([][2]int, error) {
 	ranges := [][2]int{}
 
 	if sliceLen < 0 {
-		return nil, chunksNegativeSliceSize{{ .StoredType }}
+		return nil, chunksNegativeSliceSize{{ .StoredTypeSuffix }}
 	}
 
 	if chunkSize <= 0 {
-		return nil, chunksNegativeSize{{ .StoredType }}
+		return nil, chunksNegativeSize{{ .StoredTypeSuffix }}
 	}
 
 	var prevI int
@@ -53,25 +53,25 @@ func chunks{{ .StoredType }}(sliceLen, chunkSize int) ([][2]int, error) {
 
 /* ___________ errors ___________ */
 
-type cacheError{{ .StoredType }} string
+type cacheError{{ .StoredTypeSuffix }} string
 
-func (e cacheError{{ .StoredType }}) Error() string { return string(e) }
+func (e cacheError{{ .StoredTypeSuffix }}) Error() string { return string(e) }
 
 const (
-	//NotFoundError{{ .StoredType }} not found error
-	NotFoundError{{ .StoredType }} = cacheError{{ .StoredType }}("key not found")
-	//NilValueError{{ .StoredType }} nil pointer given
-	NilValueError{{ .StoredType }} = cacheError{{ .StoredType }}("value pointer shouldnt be nil")
-	//CloseError{{ .StoredType }} cache is closed
-	CloseError{{ .StoredType }}    = cacheError{{ .StoredType }}("cache has been closed")
+	//NotFoundError{{ .StoredTypeSuffix }} not found error
+	NotFoundError{{ .StoredTypeSuffix }} = cacheError{{ .StoredTypeSuffix }}("key not found")
+	//NilValueError{{ .StoredTypeSuffix }} nil pointer given
+	NilValueError{{ .StoredTypeSuffix }} = cacheError{{ .StoredTypeSuffix }}("value pointer shouldnt be nil")
+	//CloseError{{ .StoredTypeSuffix }} cache is closed
+	CloseError{{ .StoredTypeSuffix }}    = cacheError{{ .StoredTypeSuffix }}("cache has been closed")
 
-	chunksNegativeSliceSize{{ .StoredType }} = cacheError{{ .StoredType }}("sliceLen should be non-negative")
-	chunksNegativeSize{{ .StoredType }} = cacheError{{ .StoredType }}("chunkSize should be positive")
+	chunksNegativeSliceSize{{ .StoredTypeSuffix }} = cacheError{{ .StoredTypeSuffix }}("sliceLen should be non-negative")
+	chunksNegativeSize{{ .StoredTypeSuffix }} = cacheError{{ .StoredTypeSuffix }}("chunkSize should be positive")
 )
 
 /* ___________ key_hash ___________ */
 
-func getHash{{ .StoredType }}(key []byte) uint64 {
+func getHash{{ .StoredTypeSuffix }}(key []byte) uint64 {
 	return farm.Hash64(key)
 }
 
@@ -187,11 +187,11 @@ func newNice{{ .CacheType }}() *{{ .CacheType }} {
 //Set value by key
 func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSeconds int) error {
 	if c.isClosed() {
-		return CloseError{{ .StoredType }}
+		return CloseError{{ .StoredTypeSuffix }}
 	}
 
-	h := getHash{{ .StoredType }}(key)
-	bucketIdx := getBucketIDs{{ .StoredType }}(h)
+	h := getHash{{ .StoredTypeSuffix }}(key)
+	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -219,15 +219,15 @@ func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSecon
 //Get value by key
 func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	if c.isClosed() {
-		return CloseError{{ .StoredType }}
+		return CloseError{{ .StoredTypeSuffix }}
 	}
 
 	if value == nil {
-		return NilValueError{{ .StoredType }}
+		return NilValueError{{ .StoredTypeSuffix }}
 	}
 
-	h := getHash{{ .StoredType }}(key)
-	bucketIdx := getBucketIDs{{ .StoredType }}(h)
+	h := getHash{{ .StoredTypeSuffix }}(key)
+	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -236,7 +236,7 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	indexBucketLock.RUnlock()
 
 	if !ok {
-		return NotFoundError{{ .StoredType }}
+		return NotFoundError{{ .StoredTypeSuffix }}
 	}
 
 	rowLock := c.cache.storageLocks[valueIdx]
@@ -245,12 +245,12 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 	rowLock.RUnlock()
 
 	if result.expiredTime == {{ .DeletedValueFlagName }} {
-		return NotFoundError{{ .StoredType }}
+		return NotFoundError{{ .StoredTypeSuffix }}
 	}
 
 	if (result.expiredTime - int(time.Now().Unix())) <= 0 {
 		c.deleteItem(h, valueIdx)
-		return NotFoundError{{ .StoredType }}
+		return NotFoundError{{ .StoredTypeSuffix }}
 	}
 
 	*value = result.v
@@ -260,11 +260,11 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 //Delete value by key
 func (c *{{ .CacheType }}) Delete(key []byte) error {
 	if c.isClosed() {
-		return CloseError{{ .StoredType }}
+		return CloseError{{ .StoredTypeSuffix }}
 	}
 
-	h := getHash{{ .StoredType }}(key)
-	bucketIdx := getBucketIDs{{ .StoredType }}(h)
+	h := getHash{{ .StoredTypeSuffix }}(key)
+	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -292,7 +292,7 @@ func (c *{{ .CacheType }}) Delete(key []byte) error {
 
 // deleteItem item by it bucket hash and index in bucket
 func (c *{{ .CacheType }}) deleteItem(h uint64, valueIdx int) {
-	bucketIdx := getBucketIDs{{ .StoredType }}(h)
+	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
 	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
@@ -378,7 +378,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 	)
 
 	// even for strange {{ .GcChunkSizeName }} chunks func guarantees that all indexes will present in result chunks
-	chunks, _ := chunks{{ .StoredType }}({{ .CacheSizeConstName }}, {{ .GcChunkSizeName }})
+	chunks, _ := chunks{{ .StoredTypeSuffix }}({{ .CacheSizeConstName }}, {{ .GcChunkSizeName }})
 
 	for {
 		select {
@@ -494,7 +494,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 //Flush cache. Can take a time
 func (c *{{ .CacheType }}) Flush() error {
 	if c.isClosed() {
-		return CloseError{{ .StoredType }}
+		return CloseError{{ .StoredTypeSuffix }}
 	}
 
 	c.Close()

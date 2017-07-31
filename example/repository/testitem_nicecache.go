@@ -11,7 +11,7 @@ import (
 	"time"
 	"unsafe"
 
-	. "github.com/JekaMas/nicecache/example"
+	cachetype "github.com/JekaMas/nicecache/example"
 	"github.com/dgryski/go-farm"
 )
 
@@ -94,7 +94,7 @@ const (
 )
 
 var freeBatchSizeTestItem int = (cacheSizeTestItem * freeBatchPercentTestItem) / 100
-var deletedValueTestItem = storedValueTestItem{TestItem{}, deletedValueFlagTestItem}
+var deletedValueTestItem = storedValueTestItem{cachetype.TestItem{}, deletedValueFlagTestItem}
 
 func init() {
 	if freeBatchSizeTestItem < 1 {
@@ -103,7 +103,7 @@ func init() {
 }
 
 type storedValueTestItem struct {
-	v           TestItem
+	v           cachetype.TestItem
 	expiredTime int
 }
 
@@ -183,7 +183,7 @@ func newNiceCacheTestItem() *CacheTestItem {
 }
 
 //Set value by key
-func (c *CacheTestItem) Set(key []byte, value *TestItem, expireSeconds int) error {
+func (c *CacheTestItem) Set(key []byte, value *cachetype.TestItem, expireSeconds int) error {
 	if c.isClosed() {
 		return CloseErrorTestItem
 	}
@@ -215,7 +215,7 @@ func (c *CacheTestItem) Set(key []byte, value *TestItem, expireSeconds int) erro
 }
 
 //Get value by key
-func (c *CacheTestItem) Get(key []byte, value *TestItem) error {
+func (c *CacheTestItem) Get(key []byte, value *cachetype.TestItem) error {
 	if c.isClosed() {
 		return CloseErrorTestItem
 	}

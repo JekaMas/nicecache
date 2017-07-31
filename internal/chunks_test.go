@@ -106,7 +106,7 @@ func TestChunks_OneSliceLenAndOneChunkSize_Chunk(t *testing.T) {
 	if len(chunks) != 1 {
 		t.Fatal("bad length")
 	}
-	if !reflect.DeepEqual(chunks, [][2]int{[2]int{0, 1}}) {
+	if !reflect.DeepEqual(chunks, [][2]int{{0, 1}}) {
 		t.Fatal("Not equals")
 	}
 }
@@ -120,7 +120,7 @@ func TestChunks_PositiveSliceLenAndEqualsChunkSize_Chunk(t *testing.T) {
 		t.Fatal("bad length")
 	}
 
-	if !reflect.DeepEqual(chunks, [][2]int{[2]int{0, 10}}) {
+	if !reflect.DeepEqual(chunks, [][2]int{{0, 10}}) {
 		t.Fatal("Not equals")
 	}
 }
@@ -134,7 +134,7 @@ func TestChunks_TwiceSliceLenAndPositiveChunkSize_2Chunks(t *testing.T) {
 		t.Fatal("bad length")
 	}
 
-	if !reflect.DeepEqual(chunks, [][2]int{[2]int{0, 10}, [2]int{10, 20}}) {
+	if !reflect.DeepEqual(chunks, [][2]int{{0, 10}, {10, 20}}) {
 		t.Fatal("Not equals")
 	}
 }
@@ -147,7 +147,7 @@ func TestChunks_TwiceAndOneSliceLenAndPositiveChunkSize_3Chunks(t *testing.T) {
 	if len(chunks) != 3 {
 		t.Fatal("bad length")
 	}
-	if !reflect.DeepEqual(chunks, [][2]int{[2]int{0, 10}, [2]int{10, 20}, [2]int{20, 21}}) {
+	if !reflect.DeepEqual(chunks, [][2]int{{0, 10}, {10, 20}, {20, 21}}) {
 		t.Fatal("Not equals")
 	}
 }

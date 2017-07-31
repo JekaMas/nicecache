@@ -51,6 +51,7 @@ type Metadata struct {
 	PackageName       string
 	StoredTypePackage string
 	StoredType        string
+	StoredTypeSuffix  string
 
 	IndexBuckets int
 	CacheSize    int64
@@ -80,6 +81,7 @@ func metadata(storedType string, cachePackage string, cacheSize int64, packageDi
 	withSuffix := withTypeSuffix(storedType)
 
 	m.StoredType = storedType
+	m.StoredTypeSuffix = storedType
 	m.CacheType = "Cache" + storedType
 	m.InnerCacheType = "innerCache" + storedType
 	m.PackageName = filepath.Base(packageDir)
@@ -108,7 +110,11 @@ func metadata(storedType string, cachePackage string, cacheSize int64, packageDi
 	if cachePackage != "" {
 		p, _ := os.Getwd()
 		goPath := os.Getenv("GOPATH") + "/src/"
-		m.StoredTypePackage = fmt.Sprintf("\n\t. \"%s\"", strings.TrimPrefix(p, goPath))
+
+		alias := "cachetype"
+		m.StoredTypePackage = fmt.Sprintf("\n\t%s \"%s\"", alias, strings.TrimPrefix(p, goPath))
+
+		m.StoredType = alias + "." + m.StoredType
 	}
 
 	return m
