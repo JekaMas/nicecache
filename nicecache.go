@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"text/template"
+	"path"
+	"runtime"
 
 	t "github.com/JekaMas/nicecache/template"
 )
@@ -46,6 +46,7 @@ func main() {
 	}
 }
 
+//Metadata for template code generation
 type Metadata struct {
 	PackageName       string
 	StoredTypePackage string
@@ -119,8 +120,10 @@ func withTypeSuffix(suffix string) func(string) string {
 	}
 }
 
+//Generator template code generator
 type Generator struct{}
 
+//Generate code by template and metadata
 func (g *Generator) Generate(writer io.WriteCloser, templ string, metadata Metadata) error {
 	tmpl, err := g.template(templ)
 	if err != nil {
@@ -130,10 +133,10 @@ func (g *Generator) Generate(writer io.WriteCloser, templ string, metadata Metad
 	return tmpl.Execute(writer, metadata)
 }
 
-func (g *Generator) template(templ string) (*template.Template, error) {
-	tmpl := template.New("nicecache")
+func (g *Generator) template(templateCode string) (*template.Template, error) {
+	templateGenerator := template.New("nicecache")
 
-	return tmpl.Parse(templ)
+	return templateGenerator.Parse(templateCode)
 }
 
 func formatFileName(typeName string) string {
