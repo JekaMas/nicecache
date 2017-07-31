@@ -1,16 +1,17 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 
-	t "nicecache/template"
+	t "github.com/JekaMas/nicecache/template"
 )
 
 const generatedSuffix = "_nicecache.go"
@@ -40,7 +41,7 @@ func main() {
 
 	m := metadata(*storedType, *cachePackage, *cacheSize, pkgDir)
 
-	if err := generator.Generate(writer, t.Template, m); err != nil {
+	if err := generator.Generate(writer, t.Code, m); err != nil {
 		panic(err)
 	}
 }
@@ -106,7 +107,7 @@ func metadata(storedType string, cachePackage string, cacheSize int64, packageDi
 	if cachePackage != "" {
 		p, _ := os.Getwd()
 		goPath := os.Getenv("GOPATH") + "/src/"
-		m.StoredTypePackage = fmt.Sprintf(". \"%s\"", strings.TrimPrefix(p, goPath))
+		m.StoredTypePackage = fmt.Sprintf("\n\t. \"%s\"", strings.TrimPrefix(p, goPath))
 	}
 
 	return m
@@ -144,15 +145,19 @@ func packageDir(packageName string) (string, error) {
 		return os.Getwd()
 	}
 
-	path := os.Getenv("GOPATH")
-	if path == "" {
-		return "", errors.New("GOPATH is not set")
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("No caller information")
 	}
+	sourcePathParts := strings.Split(path.Dir(filename), string(os.PathSeparator))
 
-	workDir := filepath.Join(path, "src", packageName)
-	if _, err := os.Stat(workDir); err != nil {
-		return "", err
-	}
+	// remove last part
+	sourcePathParts = sourcePathParts[:len(sourcePathParts)-1]
+
+	destinationPath := strings.Split(packageName, string(os.PathSeparator))
+
+	workPathParts := append(sourcePathParts, destinationPath...)
+	workDir := string(os.PathSeparator) + filepath.Join(workPathParts...)
 
 	return workDir, nil
 }

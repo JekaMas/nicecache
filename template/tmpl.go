@@ -1,11 +1,10 @@
 package template
 
-var Template = `
-/*
+// Code contains full code template
+var Code = `/*
 * CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
 * THIS FILE SHOULD NOT BE EDITED BY HAND
 */
-
 
 package {{ .PackageName }}
 
@@ -15,8 +14,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/dgryski/go-farm"
-	{{ .StoredTypePackage }}
+	"github.com/dgryski/go-farm"{{ .StoredTypePackage }}
 )
 
 /* ___________ bucket_hash ___________ */

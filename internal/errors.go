@@ -10,5 +10,5 @@ const (
 	CloseError    = cacheError("cache has been closed")
 
 	chunksNegativeSliceSize = cacheError("sliceLen should be non-negative")
-	chunksNegativeSize = cacheError("chunkSize should be positive")
+	chunksNegativeSize      = cacheError("chunkSize should be positive")
 )

@@ -1,20 +1,17 @@
-
 /*
 * CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
 * THIS FILE SHOULD NOT BE EDITED BY HAND
-*/
-
+ */
 
 package example
 
 import (
-    "sync"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
-	
 )
 
 /* ___________ bucket_hash ___________ */
@@ -63,7 +60,7 @@ const (
 	CloseErrorTestValue    = cacheErrorTestValue("cache has been closed")
 
 	chunksNegativeSliceSizeTestValue = cacheErrorTestValue("sliceLen should be non-negative")
-	chunksNegativeSizeTestValue = cacheErrorTestValue("chunkSize should be positive")
+	chunksNegativeSizeTestValue      = cacheErrorTestValue("chunkSize should be positive")
 )
 
 /* ___________ key_hash ___________ */
@@ -85,15 +82,15 @@ const (
 
 	// normal gc
 	// GC full circle takes time = gcTimeTestValue*(cacheSizeTestValue/gcChunkSizeTestValue)
-	gcTimeTestValue         = 1 * time.Second                  // how often gc runs
-	gcChunkPercentTestValue = 1                                // percent of items to proceed in gc step
+	gcTimeTestValue         = 1 * time.Second                                    // how often gc runs
+	gcChunkPercentTestValue = 1                                                  // percent of items to proceed in gc step
 	gcChunkSizeTestValue    = cacheSizeTestValue * gcChunkPercentTestValue / 100 // number of items to proceed in gc step
 
 	deletedValueFlagTestValue = 0
 )
 
 var freeBatchSizeTestValue int = (cacheSizeTestValue * freeBatchPercentTestValue) / 100
-var deletedValueTestValue = storedValueTestValue{ TestValue{}, deletedValueFlagTestValue }
+var deletedValueTestValue = storedValueTestValue{TestValue{}, deletedValueFlagTestValue}
 
 func init() {
 	if freeBatchSizeTestValue < 1 {
@@ -111,8 +108,8 @@ type CacheTestValue struct {
 }
 
 type innerCacheTestValue struct {
-	storage      *[cacheSizeTestValue]storedValueTestValue  // Preallocated storage
-	storageLocks [cacheSizeTestValue]*sync.RWMutex // row level locks
+	storage      *[cacheSizeTestValue]storedValueTestValue // Preallocated storage
+	storageLocks [cacheSizeTestValue]*sync.RWMutex         // row level locks
 
 	index      [indexBucketsTestValue]map[uint64]int // map[hashedKey]valueIndexInArray
 	indexLocks [indexBucketsTestValue]*sync.RWMutex  // few maps for less locks

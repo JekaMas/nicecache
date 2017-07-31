@@ -1,8 +1,3 @@
-/*
-* CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
-* THIS FILE SHOULD NOT BE EDITED BY HAND
-*/
-
 package nicecache
 
 import (

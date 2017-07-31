@@ -651,7 +651,7 @@ func TestCache_Set_Overflow(t *testing.T) {
 		t.Fatal(diff)
 	}
 
-	if n := cache.Len(); n <= int(cacheSize*(1 - float64(freeBatchSize+1)/float64(100))) {
+	if n := cache.Len(); n <= int(cacheSize*(1-float64(freeBatchSize+1)/float64(100))) {
 		t.Fatal(n)
 	}
 
