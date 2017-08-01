@@ -1,18 +1,18 @@
 /*
 * CODE GENERATED AUTOMATICALLY WITH github.com/jekamas/nicecache
 * THIS FILE SHOULD NOT BE EDITED BY HAND
- */
+*/
 
 package repository
 
 import (
-	"sync"
+    "sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
-	cachetype "github.com/JekaMas/nicecache/example"
 	"github.com/dgryski/go-farm"
+	cachetype "github.com/JekaMas/nicecache/example"
 )
 
 /* ___________ bucket_hash ___________ */
@@ -61,10 +61,10 @@ const (
 	//NilValueErrorTestItem nil pointer given
 	NilValueErrorTestItem = cacheErrorTestItem("value pointer shouldnt be nil")
 	//CloseErrorTestItem cache is closed
-	CloseErrorTestItem = cacheErrorTestItem("cache has been closed")
+	CloseErrorTestItem    = cacheErrorTestItem("cache has been closed")
 
 	chunksNegativeSliceSizeTestItem = cacheErrorTestItem("sliceLen should be non-negative")
-	chunksNegativeSizeTestItem      = cacheErrorTestItem("chunkSize should be positive")
+	chunksNegativeSizeTestItem = cacheErrorTestItem("chunkSize should be positive")
 )
 
 /* ___________ key_hash ___________ */
@@ -86,15 +86,15 @@ const (
 
 	// normal gc
 	// GC full circle takes time = gcTimeTestItem*(cacheSizeTestItem/gcChunkSizeTestItem)
-	gcTimeTestItem         = 1 * time.Second                                  // how often gc runs
-	gcChunkPercentTestItem = 1                                                // percent of items to proceed in gc step
+	gcTimeTestItem         = 1 * time.Second                  // how often gc runs
+	gcChunkPercentTestItem = 1                                // percent of items to proceed in gc step
 	gcChunkSizeTestItem    = cacheSizeTestItem * gcChunkPercentTestItem / 100 // number of items to proceed in gc step
 
 	deletedValueFlagTestItem = 0
 )
 
 var freeBatchSizeTestItem int = (cacheSizeTestItem * freeBatchPercentTestItem) / 100
-var deletedValueTestItem = storedValueTestItem{cachetype.TestItem{}, deletedValueFlagTestItem}
+var deletedValueTestItem = storedValueTestItem{ cachetype.TestItem{}, deletedValueFlagTestItem }
 
 func init() {
 	if freeBatchSizeTestItem < 1 {
@@ -113,8 +113,8 @@ type CacheTestItem struct {
 }
 
 type innerCacheTestItem struct {
-	storage      *[cacheSizeTestItem]storedValueTestItem // Preallocated storage
-	storageLocks [cacheSizeTestItem]*sync.RWMutex        // row level locks
+	storage      *[cacheSizeTestItem]storedValueTestItem  // Preallocated storage
+	storageLocks [cacheSizeTestItem]*sync.RWMutex // row level locks
 
 	index      [indexBucketsTestItem]map[uint64]int // map[hashedKey]valueIndexInArray
 	indexLocks [indexBucketsTestItem]*sync.RWMutex  // few maps for less locks
@@ -387,8 +387,7 @@ func (c *CacheTestItem) clearCache(startClearingCh chan struct{}) {
 				return
 			}
 
-			//randomly free indexes
-			c.forceGCMainCircle(rowLock, freeIdx)
+			c.randomKeyCleanCacheStrategy(rowLock, freeIdx)
 
 			// Increase freeBatchSizeTestItem progressive
 			c.setNewFreeBatchSize()
@@ -466,7 +465,7 @@ func (*CacheTestItem) setNewFreeBatchSize() {
 	}
 }
 
-func (c *CacheTestItem) forceGCMainCircle(rowLock *sync.RWMutex, freeIdx int) {
+func (c *CacheTestItem) randomKeyCleanCacheStrategy(rowLock *sync.RWMutex, freeIdx int) {
 	i := 0
 
 	for bucketIdx, bucket := range c.cache.index {

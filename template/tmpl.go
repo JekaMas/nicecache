@@ -389,8 +389,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 				return
 			}
 
-			//randomly free indexes
-			c.forceGCMainCircle(rowLock, freeIdx)
+			c.randomKeyCleanCacheStrategy(rowLock, freeIdx)
 
 			// Increase {{ .FreeBatchSizeName }} progressive
 			c.setNewFreeBatchSize()
@@ -468,7 +467,7 @@ func (*{{ .CacheType }}) setNewFreeBatchSize() {
 	}
 }
 
-func (c *{{ .CacheType }}) forceGCMainCircle(rowLock *sync.RWMutex, freeIdx int) {
+func (c *{{ .CacheType }}) randomKeyCleanCacheStrategy(rowLock *sync.RWMutex, freeIdx int) {
 	i := 0
 
 	for bucketIdx, bucket := range c.cache.index {
