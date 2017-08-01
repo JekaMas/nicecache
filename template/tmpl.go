@@ -116,10 +116,10 @@ type {{ .CacheType }} struct {
 
 type {{ .InnerCacheType }} struct {
 	storage      *[{{ .CacheSizeConstName }}]{{ .StoredValueType }}  // Preallocated storage
-	storageLocks [{{ .CacheSizeConstName }}]*sync.RWMutex // row level locks
+	storageLocks [{{ .CacheSizeConstName }}]sync.RWMutex // row level locks
 
 	index      [{{ .IndexBucketsName }}]map[uint64]int // map[hashedKey]valueIndexInArray
-	indexLocks [{{ .IndexBucketsName }}]*sync.RWMutex  // few maps for less locks
+	indexLocks [{{ .IndexBucketsName }}]sync.RWMutex  // few maps for less locks
 
 	freeIndexesLock sync.RWMutex
 	freeIndexes     []int
@@ -146,16 +146,9 @@ func newNice{{ .CacheType }}() *{{ .CacheType }} {
 		freeIndexes[i] = i
 	}
 
-	storageLocks := [{{ .CacheSizeConstName }}]*sync.RWMutex{}
-	for i := 0; i < {{ .CacheSizeConstName }}; i++ {
-		storageLocks[i] = new(sync.RWMutex)
-	}
-
 	index := [{{ .IndexBucketsName }}]map[uint64]int{}
-	indexLocks := [{{ .IndexBucketsName }}]*sync.RWMutex{}
 	for i := 0; i < {{ .IndexBucketsName }}; i++ {
 		index[i] = make(map[uint64]int, {{ .CacheSizeConstName }}/{{ .IndexBucketsName }})
-		indexLocks[i] = new(sync.RWMutex)
 	}
 
 	n := int32(len(freeIndexes))
@@ -164,9 +157,7 @@ func newNice{{ .CacheType }}() *{{ .CacheType }} {
 	c := &{{ .CacheType }}{
 		&{{ .InnerCacheType }}{
 			storage:         new([{{ .CacheSizeConstName }}]{{ .StoredValueType }}),
-			storageLocks:    storageLocks,
 			index:           index,
-			indexLocks:      indexLocks,
 			freeIndexes:     freeIndexes,
 			freeCount:       freeCount,
 			onClearing:      new(int32),
@@ -192,26 +183,24 @@ func (c *{{ .CacheType }}) Set(key []byte, value *{{ .StoredType }}, expireSecon
 
 	h := getHash{{ .StoredTypeSuffix }}(key)
 	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
 	if !ok {
 		valueIdx = c.popFreeIndex()
 
-		indexBucketLock.Lock()
+		c.cache.indexLocks[bucketIdx].Lock()
 		indexBucket[h] = valueIdx
-		indexBucketLock.Unlock()
+		c.cache.indexLocks[bucketIdx].Unlock()
 	}
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx].v = *value
 	(*c.cache.storage)[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	return nil
 }
@@ -228,21 +217,19 @@ func (c *{{ .CacheType }}) Get(key []byte, value *{{ .StoredType }}) error {
 
 	h := getHash{{ .StoredTypeSuffix }}(key)
 	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
 	if !ok {
 		return NotFoundError{{ .StoredTypeSuffix }}
 	}
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.RLock()
+	c.cache.storageLocks[valueIdx].RLock()
 	result := (*c.cache.storage)[valueIdx]
-	rowLock.RUnlock()
+	c.cache.storageLocks[valueIdx].RUnlock()
 
 	if result.expiredTime == {{ .DeletedValueFlagName }} {
 		return NotFoundError{{ .StoredTypeSuffix }}
@@ -265,22 +252,20 @@ func (c *{{ .CacheType }}) Delete(key []byte) error {
 
 	h := getHash{{ .StoredTypeSuffix }}(key)
 	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
-	indexBucketLock.Lock()
+	c.cache.indexLocks[bucketIdx].Lock()
 	delete(indexBucket, h)
-	indexBucketLock.Unlock()
+	c.cache.indexLocks[bucketIdx].Unlock()
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx] = {{ .DeletedValueName }}
 	(*c.cache.storage)[valueIdx].expiredTime = {{ .DeletedValueFlagName }}
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	if !ok {
 		return nil
@@ -293,17 +278,15 @@ func (c *{{ .CacheType }}) Delete(key []byte) error {
 // deleteItem item by it bucket hash and index in bucket
 func (c *{{ .CacheType }}) deleteItem(h uint64, valueIdx int) {
 	bucketIdx := getBucketIDs{{ .StoredTypeSuffix }}(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.Lock()
+	c.cache.indexLocks[bucketIdx].Lock()
 	delete(indexBucket, h)
-	indexBucketLock.Unlock()
+	c.cache.indexLocks[bucketIdx].Unlock()
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx] = {{ .DeletedValueName }}
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -317,7 +300,10 @@ func (c *{{ .CacheType }}) popFreeIndex() int {
 		<-endClearingCh
 	}
 
-	return c.cache.freeIndexes[freeIdx]
+	c.cache.freeIndexesLock.RLock()
+	freeIDx := c.cache.freeIndexes[freeIdx]
+	c.cache.freeIndexesLock.RUnlock()
+	return freeIDx
 }
 
 func (c *{{ .CacheType }}) forceClearCache() chan struct{} {
@@ -332,7 +318,9 @@ func (c *{{ .CacheType }}) forceClearCache() chan struct{} {
 func (c *{{ .CacheType }}) pushFreeIndex(valueIdx int) {
 	freeIdx := c.addFreeIndex()
 
+	c.cache.freeIndexesLock.Lock()
 	c.cache.freeIndexes[freeIdx] = valueIdx
+	c.cache.freeIndexesLock.Unlock()
 }
 
 // increase freeIndexCount and returns new last free index
@@ -373,8 +361,6 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 
 		freeIndexes = []int{}
 		maxFreeIdx  int
-
-		rowLock *sync.RWMutex
 	)
 
 	// even for strange {{ .GcChunkSizeName }} chunks func guarantees that all indexes will present in result chunks
@@ -389,7 +375,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 				return
 			}
 
-			c.randomKeyCleanCacheStrategy(rowLock, freeIdx)
+			c.randomKeyCleanCacheStrategy(freeIdx)
 
 			// Increase {{ .FreeBatchSizeName }} progressive
 			c.setNewFreeBatchSize()
@@ -411,19 +397,18 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 			for idx := range (*c.cache.storage)[currentChunkIndexes[0]:currentChunkIndexes[1]] {
 				indexInCacheArray = idx + currentChunkIndexes[0]
 
-				rowLock = c.cache.storageLocks[indexInCacheArray]
-				rowLock.RLock()
+				c.cache.storageLocks[indexInCacheArray].RLock()
 				iterateStoredValue = (*c.cache.storage)[indexInCacheArray]
-				rowLock.RUnlock()
+				c.cache.storageLocks[indexInCacheArray].RUnlock()
 
 				if iterateStoredValue.expiredTime == {{ .DeletedValueFlagName }} {
 					continue
 				}
 
 				if (iterateStoredValue.expiredTime - now) <= 0 {
-					rowLock.Lock()
+					c.cache.storageLocks[indexInCacheArray].Lock()
 					(*c.cache.storage)[indexInCacheArray] = {{ .DeletedValueName }}
-					rowLock.Unlock()
+					c.cache.storageLocks[indexInCacheArray].Unlock()
 
 					freeIndexes = append(freeIndexes, indexInCacheArray)
 				}
@@ -435,6 +420,7 @@ func (c *{{ .CacheType }}) clearCache(startClearingCh chan struct{}) {
 					c.cache.freeIndexes[maxFreeIdx] = indexInCacheArray
 					maxFreeIdx--
 				}
+				c.cache.freeIndexesLock.Unlock()
 
 				// try to reuse freeIndexes slice
 				if cap(freeIndexes) > 10000 {
@@ -467,36 +453,36 @@ func (*{{ .CacheType }}) setNewFreeBatchSize() {
 	}
 }
 
-func (c *{{ .CacheType }}) randomKeyCleanCacheStrategy(rowLock *sync.RWMutex, freeIdx int) {
+func (c *{{ .CacheType }}) randomKeyCleanCacheStrategy(freeIdx int) {
 	i := 0
 
 	for bucketIdx, bucket := range c.cache.index {
-		indexBucketLock := c.cache.indexLocks[bucketIdx]
-
-		indexBucketLock.Lock()
+		c.cache.indexLocks[bucketIdx].Lock()
 
 		for h, valueIdx := range bucket {
 			delete(bucket, h)
 
-			rowLock = c.cache.storageLocks[valueIdx]
-			rowLock.Lock()
+			c.cache.storageLocks[valueIdx].Lock()
 			if (*c.cache.storage)[valueIdx].expiredTime == {{ .DeletedValueFlagName }} {
 				// trying to deleteItem deleted element in map
-				rowLock.Unlock()
+				c.cache.storageLocks[valueIdx].Unlock()
 				continue
 			}
 			(*c.cache.storage)[valueIdx] = {{ .DeletedValueName }}
-			rowLock.Unlock()
+			c.cache.storageLocks[valueIdx].Unlock()
 
 			freeIdx = c.addFreeIndex()
+
+			c.cache.freeIndexesLock.Lock()
 			c.cache.freeIndexes[freeIdx] = valueIdx
+			c.cache.freeIndexesLock.Unlock()
 
 			i++
 			if i >= {{ .FreeBatchSizeName }} {
 				break
 			}
 		}
-		indexBucketLock.Unlock()
+		c.cache.indexLocks[bucketIdx].Unlock()
 	}
 }
 

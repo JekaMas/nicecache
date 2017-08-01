@@ -120,26 +120,24 @@ func (c *Cache) Set(key []byte, value *TestValue, expireSeconds int) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
 	if !ok {
 		valueIdx = c.popFreeIndex()
 
-		indexBucketLock.Lock()
+		c.cache.indexLocks[bucketIdx].Lock()
 		indexBucket[h] = valueIdx
-		indexBucketLock.Unlock()
+		c.cache.indexLocks[bucketIdx].Unlock()
 	}
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx].v = *value
 	(*c.cache.storage)[valueIdx].expiredTime = int(time.Now().Unix()) + expireSeconds
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	return nil
 }
@@ -156,21 +154,19 @@ func (c *Cache) Get(key []byte, value *TestValue) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
 	if !ok {
 		return NotFoundError
 	}
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.RLock()
+	c.cache.storageLocks[valueIdx].RLock()
 	result := (*c.cache.storage)[valueIdx]
-	rowLock.RUnlock()
+	c.cache.storageLocks[valueIdx].RUnlock()
 
 	if result.expiredTime == deletedValueFlag {
 		return NotFoundError
@@ -193,22 +189,20 @@ func (c *Cache) Delete(key []byte) error {
 
 	h := getHash(key)
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.RLock()
+	c.cache.indexLocks[bucketIdx].RLock()
 	valueIdx, ok := indexBucket[h]
-	indexBucketLock.RUnlock()
+	c.cache.indexLocks[bucketIdx].RUnlock()
 
-	indexBucketLock.Lock()
+	c.cache.indexLocks[bucketIdx].Lock()
 	delete(indexBucket, h)
-	indexBucketLock.Unlock()
+	c.cache.indexLocks[bucketIdx].Unlock()
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx] = deletedValue
 	(*c.cache.storage)[valueIdx].expiredTime = deletedValueFlag
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	if !ok {
 		return nil
@@ -221,17 +215,15 @@ func (c *Cache) Delete(key []byte) error {
 // deleteItem item by it bucket hash and index in bucket
 func (c *Cache) deleteItem(h uint64, valueIdx int) {
 	bucketIdx := getBucketIDs(h)
-	indexBucketLock := c.cache.indexLocks[bucketIdx]
 	indexBucket := c.cache.index[bucketIdx]
 
-	indexBucketLock.Lock()
+	c.cache.indexLocks[bucketIdx].Lock()
 	delete(indexBucket, h)
-	indexBucketLock.Unlock()
+	c.cache.indexLocks[bucketIdx].Unlock()
 
-	rowLock := c.cache.storageLocks[valueIdx]
-	rowLock.Lock()
+	c.cache.storageLocks[valueIdx].Lock()
 	(*c.cache.storage)[valueIdx] = deletedValue
-	rowLock.Unlock()
+	c.cache.storageLocks[valueIdx].Unlock()
 
 	c.pushFreeIndex(valueIdx)
 }
@@ -250,7 +242,10 @@ func (c *Cache) popFreeIndex() int {
 		panic(freeIdx)
 	}
 
-	return c.cache.freeIndexes[freeIdx]
+	c.cache.freeIndexesLock.RLock()
+	freeIDx := c.cache.freeIndexes[freeIdx]
+	c.cache.freeIndexesLock.RUnlock()
+	return freeIDx
 }
 
 func (c *Cache) forceClearCache() chan struct{} {
@@ -266,7 +261,9 @@ func (c *Cache) forceClearCache() chan struct{} {
 func (c *Cache) pushFreeIndex(valueIdx int) {
 	freeIdx := c.addFreeIndex()
 
+	c.cache.freeIndexesLock.Lock()
 	c.cache.freeIndexes[freeIdx] = valueIdx
+	c.cache.freeIndexesLock.Unlock()
 }
 
 // increase freeIndexCount and returns new last free index
@@ -364,10 +361,12 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 			if len(freeIndexes) > 0 {
 				maxFreeIdx = c.addNFreeIndex(len(freeIndexes))
+				c.cache.freeIndexesLock.Lock()
 				for _, indexInCacheArray := range freeIndexes {
 					c.cache.freeIndexes[maxFreeIdx] = indexInCacheArray
 					maxFreeIdx--
 				}
+				c.cache.freeIndexesLock.Unlock()
 
 				// try to reuse freeIndexes slice
 				if cap(freeIndexes) > 10000 {
@@ -404,9 +403,7 @@ func (c *Cache) randomKeyCleanCacheStrategy(freeIdx int) {
 	i := 0
 
 	for bucketIdx, bucket := range c.cache.index {
-		indexBucketLock := c.cache.indexLocks[bucketIdx]
-
-		indexBucketLock.Lock()
+		c.cache.indexLocks[bucketIdx].Lock()
 
 		for h, valueIdx := range bucket {
 			delete(bucket, h)
@@ -421,14 +418,17 @@ func (c *Cache) randomKeyCleanCacheStrategy(freeIdx int) {
 			c.cache.storageLocks[valueIdx].Unlock()
 
 			freeIdx = c.addFreeIndex()
+
+			c.cache.freeIndexesLock.Lock()
 			c.cache.freeIndexes[freeIdx] = valueIdx
+			c.cache.freeIndexesLock.Unlock()
 
 			i++
 			if i >= freeBatchSize {
 				break
 			}
 		}
-		indexBucketLock.Unlock()
+		c.cache.indexLocks[bucketIdx].Unlock()
 	}
 }
 
@@ -439,6 +439,8 @@ func (c *Cache) Flush() error {
 	}
 
 	c.Close()
+	//todo can i do better?
+	time.Sleep(1*time.Second)
 
 	newCache := newNiceCache()
 
