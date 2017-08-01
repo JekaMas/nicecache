@@ -48,10 +48,10 @@ type Cache struct {
 
 type cache struct {
 	storage      *[cacheSize]storedValue  // Preallocated storage
-	storageLocks [cacheSize]*sync.RWMutex // row level locks
+	storageLocks [cacheSize]sync.RWMutex // row level locks
 
 	index      [indexBuckets]map[uint64]int // map[hashedKey]valueIndexInArray
-	indexLocks [indexBuckets]*sync.RWMutex  // few maps for less locks
+	indexLocks [indexBuckets]sync.RWMutex  // few maps for less locks
 
 	freeIndexesLock sync.RWMutex
 	freeIndexes     []int
@@ -78,16 +78,12 @@ func newNiceCache() *Cache {
 		freeIndexes[i] = i
 	}
 
-	storageLocks := [cacheSize]*sync.RWMutex{}
-	for i := 0; i < cacheSize; i++ {
-		storageLocks[i] = new(sync.RWMutex)
-	}
+	storageLocks := [cacheSize]sync.RWMutex{}
+	indexLocks := [indexBuckets]sync.RWMutex{}
 
 	index := [indexBuckets]map[uint64]int{}
-	indexLocks := [indexBuckets]*sync.RWMutex{}
 	for i := 0; i < indexBuckets; i++ {
 		index[i] = make(map[uint64]int, cacheSize/indexBuckets)
-		indexLocks[i] = new(sync.RWMutex)
 	}
 
 	n := int32(len(freeIndexes))
@@ -312,8 +308,6 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 
 		freeIndexes = []int{}
 		maxFreeIdx  int
-
-		rowLock *sync.RWMutex
 	)
 
 	// even for strange gcChunkSize chunks func guarantees that all indexes will present in result chunks
@@ -329,7 +323,7 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			}
 
 			//todo add more cleaning cache strategies
-			c.randomKeyCleanCacheStrategy(rowLock, freeIdx)
+			c.randomKeyCleanCacheStrategy(freeIdx)
 
 			// Increase freeBatchSize progressive
 			c.setNewFreeBatchSize()
@@ -351,19 +345,18 @@ func (c *Cache) clearCache(startClearingCh chan struct{}) {
 			for idx := range (*c.cache.storage)[currentChunkIndexes[0]:currentChunkIndexes[1]] {
 				indexInCacheArray = idx + currentChunkIndexes[0]
 
-				rowLock = c.cache.storageLocks[indexInCacheArray]
-				rowLock.RLock()
+				c.cache.storageLocks[indexInCacheArray].RLock()
 				iterateStoredValue = (*c.cache.storage)[indexInCacheArray]
-				rowLock.RUnlock()
+				c.cache.storageLocks[indexInCacheArray].RUnlock()
 
 				if iterateStoredValue.expiredTime == deletedValueFlag {
 					continue
 				}
 
 				if (iterateStoredValue.expiredTime - now) <= 0 {
-					rowLock.Lock()
+					c.cache.storageLocks[indexInCacheArray].Lock()
 					(*c.cache.storage)[indexInCacheArray] = deletedValue
-					rowLock.Unlock()
+					c.cache.storageLocks[indexInCacheArray].Unlock()
 
 					freeIndexes = append(freeIndexes, indexInCacheArray)
 				}
@@ -407,7 +400,7 @@ func (*Cache) setNewFreeBatchSize() {
 	}
 }
 
-func (c *Cache) randomKeyCleanCacheStrategy(rowLock *sync.RWMutex, freeIdx int) {
+func (c *Cache) randomKeyCleanCacheStrategy(freeIdx int) {
 	i := 0
 
 	for bucketIdx, bucket := range c.cache.index {
@@ -418,15 +411,14 @@ func (c *Cache) randomKeyCleanCacheStrategy(rowLock *sync.RWMutex, freeIdx int) 
 		for h, valueIdx := range bucket {
 			delete(bucket, h)
 
-			rowLock = c.cache.storageLocks[valueIdx]
-			rowLock.Lock()
+			c.cache.storageLocks[valueIdx].Lock()
 			if (*c.cache.storage)[valueIdx].expiredTime == deletedValueFlag {
 				// trying to deleteItem deleted element in map
-				rowLock.Unlock()
+				c.cache.storageLocks[valueIdx].Unlock()
 				continue
 			}
 			(*c.cache.storage)[valueIdx] = deletedValue
-			rowLock.Unlock()
+			c.cache.storageLocks[valueIdx].Unlock()
 
 			freeIdx = c.addFreeIndex()
 			c.cache.freeIndexes[freeIdx] = valueIdx
