@@ -9,13 +9,13 @@ This is fastest golang cache*
 
 
 #### Note
-Im really need you advices and usage experience, please feel free to write me you issues, feature requests and use cases.
+I`m really need you advices and usage experience, please feel free to write me you issues, feature requests and use cases.
 
 
 ## Usage
 
 First of all you need to generate nicecache files.
-You could create cache file in the same package as cached type:
+You could create a cache file in the same package as cached type:
 ```go
 //go:generate nicecache -type=TestValue -cacheSize=10000000
 type TestValue struct {
